@@ -1,0 +1,22 @@
+name: bookly
+description: "Bookly: encuentra, compara y reserva servicios de belleza y bienestar."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.0.0
+
+# Esta primera versión no usa paquetes externos: solo Flutter.
+# Más adelante aquí se agregarán firebase_core, cloud_firestore, etc.
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png
