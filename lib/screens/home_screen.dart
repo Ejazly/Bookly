@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../services/database.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common.dart';
 import 'business_screen.dart';
 
-/// Pantalla 3.3: Inicio / Explorar negocios.
+/// Inicio del cliente: buscar y explorar negocios.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -15,6 +16,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final Stream<List<Business>> _stream = Database.instance.businessesStream();
   String _query = '';
   BusinessCategory? _category; // null = Todos
 
@@ -41,56 +43,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = AppScope.of(context);
+    final session = AppScope.of(context);
     final q = _query.trim().toLowerCase();
-
-    // Filtra por categoría y por texto (nombre del negocio o de un servicio).
-    final list = state.businesses.where((b) {
-      final matchesCategory = _category == null || b.category == _category;
-      final matchesText = q.isEmpty ||
-          b.name.toLowerCase().contains(q) ||
-          b.services.any((s) => s.name.toLowerCase().contains(q));
-      return matchesCategory && matchesText;
-    }).toList()
-      ..sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
-
-    final promos = state.businesses.where((b) => b.promo != null).toList();
+    final now = DateTime.now();
 
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Hola, ${state.userName}',
-                        style: const TextStyle(color: AppColors.muted)),
-                    const Text(
-                      '¿Qué te hacemos hoy?',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton.filled(
-                onPressed: () => showSoon(context),
-                style: IconButton.styleFrom(backgroundColor: AppColors.teal),
-                icon: const Icon(Icons.notifications_none, color: Colors.white),
-              ),
-            ],
+          Text('Hola, ${session.firstName}',
+              style: const TextStyle(color: AppColors.muted)),
+          const Text(
+            '¿Qué te hacemos hoy?',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: AppColors.ink,
+            ),
           ),
           const SizedBox(height: 14),
           TextField(
             onChanged: (v) => setState(() => _query = v),
-            decoration:
-                fieldDecoration('Buscar negocio o servicio', icon: Icons.search),
+            decoration: fieldDecoration('Buscar negocio o dirección', icon: Icons.search),
           ),
           const SizedBox(height: 12),
           SizedBox(
@@ -103,75 +77,50 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          if (promos.isNotEmpty && q.isEmpty && _category == null) ...[
-            const SizedBox(height: 14),
-            GestureDetector(
-              onTap: () => openBusiness(context, promos.first),
-              child: GradientBox(
-                colors: const [AppColors.blue, AppColors.teal],
-                radius: 16,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'PROMOCIÓN',
-                        style: TextStyle(color: Color(0xDDFFFFFF), fontSize: 11),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        promos.first.promo!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        promos.first.name,
-                        style: const TextStyle(
-                            color: Color(0xDDFFFFFF), fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Cerca de ti',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-              ),
-              TextButton(
-                onPressed: () => showSoon(context),
-                child: const Text('Ver mapa'),
-              ),
-            ],
+          const Text(
+            'Negocios',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
           ),
-          if (list.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'No encontramos negocios con esa búsqueda.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.muted),
-              ),
-            ),
-          for (final b in list)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: BusinessCard(
-                business: b,
-                now: state.now,
-                onTap: () => openBusiness(context, b),
-              ),
-            ),
+          const SizedBox(height: 10),
+          StreamBuilder<List<Business>>(
+            stream: _stream,
+            builder: (context, snapshot) {
+              final status = streamStatus(snapshot);
+              if (status != null) return status;
+              final list = snapshot.data!.where((b) {
+                final matchesCategory = _category == null || b.category == _category;
+                final matchesText = q.isEmpty ||
+                    b.name.toLowerCase().contains(q) ||
+                    b.address.toLowerCase().contains(q);
+                return matchesCategory && matchesText;
+              }).toList();
+
+              if (list.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'No encontramos negocios con esa búsqueda.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.muted),
+                  ),
+                );
+              }
+              return Column(
+                children: [
+                  for (final b in list)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: BusinessCard(
+                        business: b,
+                        now: now,
+                        onTap: () => openBusiness(context, b),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
         ],
       ),
     );

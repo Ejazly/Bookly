@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../theme/app_colors.dart';
-import '../utils/format.dart';
+import 'site_widgets.dart';
 
 /// Rectángulo con degradado que sustituye a las fotos mientras no
 /// tengamos imágenes reales en Firebase Storage.
@@ -289,18 +289,12 @@ class BusinessCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final b = business;
     final open = b.isOpenAt(now);
-    final preview = b.services.take(2).map((s) => s.name).join(' · ');
     return AppCard(
       onTap: onTap,
       padding: const EdgeInsets.all(10),
       child: Row(
         children: [
-          GradientBox(
-            colors: b.colors,
-            width: 64,
-            height: 64,
-            child: Icon(b.category.icon, color: Colors.white, size: 28),
-          ),
+          BusinessLogo(business: b),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -314,9 +308,16 @@ class BusinessCard extends StatelessWidget {
                     color: AppColors.ink,
                   ),
                 ),
+                if (b.slogan.isNotEmpty)
+                  Text(
+                    b.slogan,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: b.accent, fontSize: 12, fontStyle: FontStyle.italic),
+                  ),
                 const SizedBox(height: 2),
                 Text(
-                  '$preview · Desde ${money(b.minPrice)}',
+                  '${b.categoryLabel} · ${b.address}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: AppColors.muted, fontSize: 12),
@@ -324,12 +325,16 @@ class BusinessCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.star, color: AppColors.amber, size: 16),
-                    const SizedBox(width: 3),
-                    Text(
-                      '${b.rating} · ${b.distanceKm} km',
-                      style: const TextStyle(fontSize: 12),
-                    ),
+                    if (b.rating > 0) ...[
+                      const Icon(Icons.star, color: AppColors.amber, size: 16),
+                      const SizedBox(width: 3),
+                      Text(b.rating.toStringAsFixed(1),
+                          style: const TextStyle(fontSize: 12)),
+                    ] else
+                      const Text('Nuevo en Bookly',
+                          style: TextStyle(fontSize: 12, color: AppColors.blue)),
+                    Text(' · ${b.hoursText}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                   ],
                 ),
               ],
@@ -343,6 +348,59 @@ class BusinessCard extends StatelessWidget {
                   color: AppColors.muted,
                   background: AppColors.light,
                 ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Muestra un indicador de carga o un mensaje de error para un StreamBuilder.
+/// Regresa null cuando ya hay datos.
+Widget? streamStatus(AsyncSnapshot<Object?> snapshot, {String? emptyHint}) {
+  if (snapshot.hasError) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        'No se pudieron cargar los datos.\n${snapshot.error}',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: AppColors.red),
+      ),
+    );
+  }
+  if (!snapshot.hasData) {
+    return const Padding(
+      padding: EdgeInsets.all(32),
+      child: Center(child: CircularProgressIndicator()),
+    );
+  }
+  return null;
+}
+
+/// Mensaje centrado para listas vacías.
+class EmptyMessage extends StatelessWidget {
+  const EmptyMessage({super.key, required this.icon, required this.text, this.action});
+
+  final IconData icon;
+  final String text;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          Icon(icon, size: 44, color: AppColors.teal),
+          const SizedBox(height: 10),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          ),
+          if (action != null) ...[
+            const SizedBox(height: 14),
+            action!,
+          ],
         ],
       ),
     );

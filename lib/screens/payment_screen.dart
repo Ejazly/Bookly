@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../logic/schedule.dart';
 import '../models/models.dart';
+import '../services/database.dart';
+import '../services/email_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../utils/format.dart';
@@ -27,9 +30,9 @@ class PaymentScreen extends StatefulWidget {
   });
 
   final Business business;
-  final Service service;
+  final Item service;
   final DateTime start;
-  final Professional? preferred;
+  final String? preferred; // null = cualquiera
   final String note;
 
   @override
@@ -66,7 +69,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (match == null) return 'Usa el formato MM/AA';
     final month = int.parse(match.group(1)!);
     final year = 2000 + int.parse(match.group(2)!);
-    final now = AppScope.read(context).now;
+    final now = DateTime.now();
     // La tarjeta vence al terminar el mes indicado.
     final expires = DateTime(year, month + 1);
     if (!expires.isAfter(now)) return 'La tarjeta está vencida';
@@ -96,31 +99,39 @@ class _PaymentScreenState extends State<PaymentScreen> {
       return;
     }
 
-    final state = AppScope.read(context);
+    final session = AppScope.read(context);
     try {
-      final a = state.book(
+      final a = await Database.instance.book(
         business: widget.business,
         service: widget.service,
         start: widget.start,
-        preferred: widget.preferred,
+        clientUid: session.user?.uid,
+        clientName: session.displayName,
+        clientEmail: session.email,
+        preferredProfessional: widget.preferred,
         note: widget.note,
       );
+      // Aviso por correo al negocio (si falla, la cita ya quedó guardada).
+      final sent = await EmailService.notifyNewBooking(a);
+      if (!mounted) return;
       setState(() => _paying = false);
       await showInfoDialog(
         context,
         title: '¡Cita confirmada!',
-        message: '${a.service.name} en ${a.business.name}\n'
-            '${shortDate(a.start)} · ${hhmm(a.start)} con ${a.professional.name}\n\n'
+        message: '${a.serviceName} en ${a.businessName}\n'
+            '${shortDate(a.start)} · ${hhmm(a.start)} con ${a.professional}\n\n'
             'Anticipo pagado: ${money2(a.depositPaid)}\n'
-            'Pagarás ${money2(a.remaining)} en el negocio.',
+            'Pagarás ${money2(a.remaining)} en el negocio.'
+            '${sent ? '\n\nLe avisamos al negocio por correo.' : ''}',
         icon: Icons.check_circle,
         color: AppColors.green,
       );
       if (!mounted) return;
       // Regresamos al inicio y abrimos la pestaña "Mis citas".
-      state.tab = 2;
+      session.clientTab = 2;
       Navigator.of(context).popUntil((route) => route.isFirst);
     } on BookingException catch (e) {
+      if (!mounted) return;
       setState(() => _paying = false);
       await showInfoDialog(
         context,
@@ -129,6 +140,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
         icon: Icons.event_busy,
         color: AppColors.amber,
       );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _paying = false);
+      showMessage(context, 'No se pudo guardar la cita: $e');
     }
   }
 
@@ -278,7 +293,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 _row('Negocio', widget.business.name),
                 _row('Fecha',
                     '${shortDate(widget.start)} · ${hhmm(widget.start)}'),
-                _row('Profesional', widget.preferred?.name ?? 'Cualquiera'),
+                _row('Profesional', widget.preferred ?? 'Cualquiera'),
                 const Divider(height: 24),
                 _row('Anticipo (25 %)', money2(deposit), strong: true),
                 _row('Restante a pagar en el negocio',
@@ -298,7 +313,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const AppCard(
               color: Color(0xFFE6F0F2),
               child: Text(
-                'Serás dirigida a Mercado Pago para autorizar el cargo. '
+                'Se abrirá Mercado Pago para autorizar el cargo. '
                 '(En esta versión el pago se simula y siempre se aprueba.)',
                 style: TextStyle(fontSize: 12, color: AppColors.deep),
               ),

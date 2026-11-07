@@ -1,16 +1,22 @@
 name: bookly
 description: "Bookly: encuentra, compara y reserva servicios de belleza y bienestar."
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
-  sdk: ^3.0.0
+  sdk: ^3.10.0
 
-# Esta primera versión no usa paquetes externos: solo Flutter.
-# Más adelante aquí se agregarán firebase_core, cloud_firestore, etc.
 dependencies:
   flutter:
     sdk: flutter
+  # Firebase: inicio de sesión con Google y base de datos en la nube
+  firebase_core: ^5.0.0
+  firebase_auth: ^7.0.0
+  cloud_firestore: ^7.0.0
+  # Elegir fotos de la galería para productos y publicaciones
+  image_picker: ^1.2.0
+  # Enviar los correos de aviso por medio de EmailJS
+  http: ^1.5.0
 
 dev_dependencies:
   flutter_test:

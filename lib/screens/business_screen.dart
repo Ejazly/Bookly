@@ -1,43 +1,56 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../services/database.dart';
 import '../theme/app_colors.dart';
 import '../utils/format.dart';
 import '../widgets/common.dart';
+import '../widgets/images.dart';
+import '../widgets/post_card.dart';
+import '../widgets/site_widgets.dart';
 import 'booking_screen.dart';
 
-/// Abre el perfil de un negocio.
+/// Abre el sitio de un negocio.
 void openBusiness(BuildContext context, Business business) {
   Navigator.of(context).push(
     MaterialPageRoute(builder: (_) => BusinessScreen(business: business)),
   );
 }
 
-/// Pantalla 3.4: Perfil del negocio.
+/// Sitio del negocio tal como lo ven los clientes: portada, logo, eslogan,
+/// "acerca de", contacto, servicios, productos, fotos y publicaciones.
+///
+/// Con [preview] = true el dueño ve su propio sitio sin poder reservar.
 class BusinessScreen extends StatefulWidget {
-  const BusinessScreen({super.key, required this.business});
+  const BusinessScreen({super.key, required this.business, this.preview = false});
 
   final Business business;
+  final bool preview;
 
   @override
   State<BusinessScreen> createState() => _BusinessScreenState();
 }
 
 class _BusinessScreenState extends State<BusinessScreen> {
-  int _tab = 0; // 0 Servicios, 1 Fotos, 2 Videos, 3 Reseñas
-  bool _favorite = false;
+  int _tab = 0; // 0 Servicios, 1 Productos, 2 Fotos, 3 Publicaciones
+  late final Stream<Business?> _business = Database.instance.businessStream(widget.business.id);
+  late final Stream<List<Item>> _items = Database.instance.itemsStream(widget.business.id);
+  late final Stream<List<GalleryPhoto>> _gallery =
+      Database.instance.galleryStream(widget.business.id);
+  late final Stream<List<Post>> _posts = Database.instance.postsByBusiness(widget.business.id);
 
-  void _book(Service service) {
+  void _book(Business b, Item service) {
+    if (widget.preview) {
+      showMessage(context, 'Vista previa: así verán tus clientes el botón Reservar.');
+      return;
+    }
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            BookingScreen(business: widget.business, service: service),
-      ),
+      MaterialPageRoute(builder: (_) => BookingScreen(business: b, service: service)),
     );
   }
 
-  Widget _tabs() {
-    const labels = ['Servicios', 'Fotos', 'Videos', 'Reseñas'];
+  Widget _tabs(Color accent) {
+    const labels = ['Servicios', 'Productos', 'Fotos', 'Novedades'];
     return Container(
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Color(0xFFDDE3E5))),
@@ -54,7 +67,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                   decoration: BoxDecoration(
                     border: Border(
                       bottom: BorderSide(
-                        color: _tab == i ? AppColors.teal : Colors.transparent,
+                        color: _tab == i ? accent : Colors.transparent,
                         width: 3,
                       ),
                     ),
@@ -62,9 +75,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
                   child: Text(
                     labels[i],
                     style: TextStyle(
-                      color: _tab == i ? AppColors.teal : AppColors.muted,
-                      fontWeight:
-                          _tab == i ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 13,
+                      color: _tab == i ? accent : AppColors.muted,
+                      fontWeight: _tab == i ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 ),
@@ -75,284 +88,269 @@ class _BusinessScreenState extends State<BusinessScreen> {
     );
   }
 
-  List<Widget> _services() {
-    final b = widget.business;
-    return [
-      for (final s in b.services)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: AppCard(
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(s.name,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15)),
-                      Text(durationText(s.minutes),
-                          style: const TextStyle(
-                              color: AppColors.muted, fontSize: 12)),
-                    ],
-                  ),
-                ),
-                Text(
-                  money(s.price),
-                  style: const TextStyle(
-                    color: AppColors.teal,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                FilledButton(
-                  onPressed: () => _book(s),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.green,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: const Text('Reservar'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      if (b.promo != null)
-        AppCard(
-          color: AppColors.greenSoft,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'PROMOCIÓN ACTIVA',
-                style: TextStyle(
-                  color: AppColors.green,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
+  Widget _itemsTab(Business b, {required bool services}) {
+    return StreamBuilder<List<Item>>(
+      stream: _items,
+      builder: (context, snapshot) {
+        final status = streamStatus(snapshot);
+        if (status != null) return status;
+        final list = snapshot.data!
+            .where((i) => i.active && i.isService == services)
+            .toList();
+        if (list.isEmpty) {
+          return EmptyMessage(
+            icon: services ? Icons.content_cut : Icons.shopping_bag_outlined,
+            text: services
+                ? 'Este negocio aún no publica servicios.'
+                : 'Este negocio aún no publica productos.',
+          );
+        }
+        return Column(
+          children: [
+            for (final item in list)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _ItemCard(
+                  item: item,
+                  accent: b.accent,
+                  onBook: services ? () => _book(b, item) : null,
                 ),
               ),
-              const SizedBox(height: 3),
-              Text(b.promo!),
-            ],
-          ),
-        ),
-    ];
+          ],
+        );
+      },
+    );
   }
 
-  List<Widget> _photos() {
-    final b = widget.business;
-    return [
-      GridView.count(
-        crossAxisCount: 3,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        children: List.generate(
-          6,
-          (i) => GradientBox(
-            colors: i.isEven ? b.colors : b.colors.reversed.toList(),
-            child: const Icon(Icons.photo_outlined, color: Color(0x99FFFFFF)),
-          ),
-        ),
-      ),
-    ];
-  }
-
-  List<Widget> _videos() {
-    final b = widget.business;
-    return [
-      for (var i = 0; i < 2; i++)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: GestureDetector(
-            onTap: () => showSoon(context),
-            child: GradientBox(
-              colors: i == 0 ? b.colors : b.colors.reversed.toList(),
-              height: 170,
-              radius: 16,
-              child: Stack(
-                children: [
-                  const Center(
-                    child: CircleAvatar(
-                      radius: 26,
-                      backgroundColor: Color(0xE6FFFFFF),
-                      child: Icon(Icons.play_arrow,
-                          color: AppColors.teal, size: 32),
-                    ),
+  Widget _galleryTab() {
+    return StreamBuilder<List<GalleryPhoto>>(
+      stream: _gallery,
+      builder: (context, snapshot) {
+        final status = streamStatus(snapshot);
+        if (status != null) return status;
+        final photos = snapshot.data!;
+        if (photos.isEmpty) {
+          return const EmptyMessage(
+            icon: Icons.photo_library_outlined,
+            text: 'Este negocio aún no sube fotos.',
+          );
+        }
+        return GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 6,
+          children: [
+            for (final p in photos)
+              GestureDetector(
+                onTap: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => Dialog(
+                    clipBehavior: Clip.antiAlias,
+                    child: Base64Image(data: p.imageBase64, radius: 0, fit: BoxFit.contain),
                   ),
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: 10,
-                    child: Text(
-                      i == 0 ? b.videoCaption : 'Recorrido por nuestras instalaciones',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-    ];
-  }
-
-  List<Widget> _reviews() {
-    final b = widget.business;
-    if (b.reviews.isEmpty) {
-      return [const Text('Aún no hay reseñas.')];
-    }
-    return [
-      for (final r in b.reviews)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: AppCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(r.author,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                    for (var i = 0; i < 5; i++)
-                      Icon(
-                        i < r.stars ? Icons.star : Icons.star_border,
-                        color: AppColors.amber,
-                        size: 16,
-                      ),
-                  ],
                 ),
-                const SizedBox(height: 4),
-                Text(r.text),
-              ],
-            ),
-          ),
-        ),
-    ];
+                child: Base64Image(data: p.imageBase64, radius: 10),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _postsTab() {
+    return StreamBuilder<List<Post>>(
+      stream: _posts,
+      builder: (context, snapshot) {
+        final status = streamStatus(snapshot);
+        if (status != null) return status;
+        final posts = snapshot.data!;
+        if (posts.isEmpty) {
+          return const EmptyMessage(
+            icon: Icons.campaign_outlined,
+            text: 'Sin publicaciones por ahora.',
+          );
+        }
+        return Column(
+          children: [
+            for (final p in posts)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: PostCard(post: p),
+              ),
+          ],
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final b = widget.business;
     final top = MediaQuery.of(context).padding.top;
 
-    final List<Widget> content;
-    switch (_tab) {
-      case 1:
-        content = _photos();
-        break;
-      case 2:
-        content = _videos();
-        break;
-      case 3:
-        content = _reviews();
-        break;
-      default:
-        content = _services();
-    }
+    // Se escucha el negocio para que los cambios de diseño se vean al momento.
+    return StreamBuilder<Business?>(
+      stream: _business,
+      initialData: widget.business,
+      builder: (context, snapshot) {
+        final b = snapshot.data ?? widget.business;
+        final closed = b.closedWeekdays.toList()..sort();
+        final Widget content = switch (_tab) {
+          1 => _itemsTab(b, services: false),
+          2 => _galleryTab(),
+          3 => _postsTab(),
+          _ => _itemsTab(b, services: true),
+        };
 
-    return Scaffold(
-      body: ListView(
-        padding: EdgeInsets.zero,
-        children: [
-          // Portada
-          Stack(
+        return Scaffold(
+          appBar: widget.preview
+              ? AppBar(
+                  title: const Text('Vista previa de tu sitio'),
+                  backgroundColor: AppColors.amberSoft,
+                )
+              : null,
+          body: ListView(
+            padding: EdgeInsets.zero,
             children: [
-              GradientBox(
-                colors: b.colors,
-                height: 200,
-                radius: 0,
-                child: Center(
-                  child: Icon(b.category.icon,
-                      size: 70, color: const Color(0x55FFFFFF)),
-                ),
+              BusinessSiteHeader(
+                business: b,
+                topInset: widget.preview ? 0 : top,
+                leading: widget.preview
+                    ? null
+                    : IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: IconButton.styleFrom(backgroundColor: const Color(0x33000000)),
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      ),
               ),
-              Positioned(
-                top: top + 6,
-                left: 8,
-                child: IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: IconButton.styleFrom(
-                      backgroundColor: const Color(0x33000000)),
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (b.rating > 0)
+                          StatusBadge('★ ${b.rating.toStringAsFixed(1)}',
+                              color: const Color(0xFFB57511), background: AppColors.amberSoft),
+                        StatusBadge('Horario ${b.hoursText}'),
+                        if (closed.isNotEmpty)
+                          StatusBadge(
+                            'Cierra ${closed.map(weekdayShort).join(', ')}',
+                            color: AppColors.muted,
+                            background: AppColors.light,
+                          ),
+                      ],
+                    ),
+                    if (b.description.isNotEmpty) ...[
+                      const SectionLabel('Acerca de nosotros'),
+                      Text(b.description, style: const TextStyle(height: 1.4)),
+                    ],
+                    const SectionLabel('Nuestro equipo'),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final m in b.team)
+                          StatusBadge(
+                            '${m.name} · ${m.hoursText}',
+                            color: b.accent,
+                            background: AppColors.light,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SocialLinks(business: b),
+                    const SizedBox(height: 14),
+                    _tabs(b.accent),
+                    const SizedBox(height: 12),
+                    content,
+                  ],
                 ),
               ),
             ],
           ),
-          // Tarjeta con la información (se sube sobre la portada)
-          Transform.translate(
-            offset: const Offset(0, -36),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: AppCard(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        );
+      },
+    );
+  }
+}
+
+class _ItemCard extends StatelessWidget {
+  const _ItemCard({required this.item, required this.accent, this.onBook});
+
+  final Item item;
+  final Color accent;
+  final VoidCallback? onBook; // null = producto (no se agenda)
+
+  @override
+  Widget build(BuildContext context) {
+    final i = item;
+    return AppCard(
+      padding: const EdgeInsets.all(10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Base64Image(
+            data: i.imageBase64,
+            width: 72,
+            height: 72,
+            placeholderIcon: i.isService ? Icons.content_cut : Icons.shopping_bag_outlined,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(i.name,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                if (i.description.isNotEmpty)
+                  Text(i.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                const SizedBox(height: 6),
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            b.name,
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                    Text(money(i.price),
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        )),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        i.isService
+                            ? durationText(i.minutes)
+                            : (i.stock > 0 ? 'Disponible en el negocio' : 'Agotado'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: !i.isService && i.stock <= 0
+                              ? AppColors.red
+                              : AppColors.muted,
                         ),
-                        IconButton(
-                          onPressed: () =>
-                              setState(() => _favorite = !_favorite),
-                          icon: Icon(
-                            _favorite ? Icons.favorite : Icons.favorite_border,
-                            color: AppColors.red,
-                          ),
+                      ),
+                    ),
+                    if (onBook != null)
+                      FilledButton(
+                        onPressed: onBook,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.green,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
                         ),
-                      ],
-                    ),
-                    Text('${b.address} · ${b.distanceKm} km',
-                        style: const TextStyle(
-                            color: AppColors.muted, fontSize: 12)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        const Icon(Icons.star, color: AppColors.amber, size: 18),
-                        Text('${b.rating}',
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('(${b.reviewCount} reseñas)',
-                            style: const TextStyle(color: AppColors.muted)),
-                        StatusBadge(
-                            'Horario ${b.openHour}:00 – ${b.closeHour}:00'),
-                      ],
-                    ),
+                        child: const Text('Reservar'),
+                      ),
                   ],
                 ),
-              ),
-            ),
-          ),
-          Transform.translate(
-            offset: const Offset(0, -24),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _tabs(),
-                  const SizedBox(height: 12),
-                  ...content,
-                ],
-              ),
+              ],
             ),
           ),
         ],

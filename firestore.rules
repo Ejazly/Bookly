@@ -1,0 +1,67 @@
+rules_version = '2';
+
+// Reglas de seguridad de Bookly.
+// Cópialas en Firebase Console → Firestore Database → Reglas → Publicar.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    // Los negocios de ejemplo se llaman demo_1, demo_2...
+    function isDemo(id) {
+      return id.matches('demo_.*');
+    }
+
+    // Cada quien solo lee y escribe su propio perfil.
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Todos los usuarios ven los negocios; solo el dueño los modifica.
+    match /businesses/{businessId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && (request.auth.uid == businessId || isDemo(businessId));
+      allow delete: if signedIn() && request.auth.uid == businessId;
+
+      match /items/{itemId} {
+        allow read: if signedIn();
+        allow write: if signedIn()
+          && (request.auth.uid == businessId || isDemo(businessId));
+      }
+
+      // Galería de fotos del sitio del negocio.
+      match /gallery/{photoId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == businessId;
+      }
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && (request.resource.data.businessId == request.auth.uid
+            || isDemo(request.resource.data.businessId));
+      allow update, delete: if signedIn()
+        && resource.data.businessId == request.auth.uid;
+    }
+
+    // Cualquier usuario puede leer citas para saber qué horarios están
+    // ocupados. Solo el cliente de la cita o el negocio pueden modificarla.
+    match /appointments/{appointmentId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update: if signedIn()
+        && (resource.data.businessId == request.auth.uid
+            || resource.data.clientUid == request.auth.uid
+            || resource.data.clientEmail == myEmail());
+      allow delete: if false;
+    }
+  }
+}

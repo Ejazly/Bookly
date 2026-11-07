@@ -1,47 +1,100 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-/// Porcentaje del costo que se paga por adelantado al reservar.
+/// Porcentaje del costo que se paga por adelantado al reservar desde la app.
 const double depositRate = 0.25;
 
 /// Calcula el anticipo (25 %) redondeado a centavos.
 double depositFor(double price) =>
     (price * depositRate * 100).roundToDouble() / 100;
 
-/// Un servicio que ofrece un negocio (ej. "Corte + barba").
-class Service {
-  const Service({
-    required this.id,
+// -----------------------------------------------------------------------------
+// Funciones pequeñas para leer datos de Firestore sin que la app truene si
+// un campo falta o viene con otro tipo.
+// -----------------------------------------------------------------------------
+
+DateTime? readDate(Object? v) {
+  if (v is Timestamp) return v.toDate();
+  if (v is DateTime) return v;
+  return null;
+}
+
+double _double(Object? v, [double fallback = 0]) =>
+    v is num ? v.toDouble() : fallback;
+
+int _int(Object? v, [int fallback = 0]) => v is num ? v.toInt() : fallback;
+
+String _string(Object? v) => v is String ? v : '';
+
+String? _nullableString(Object? v) => v is String && v.isNotEmpty ? v : null;
+
+bool _bool(Object? v, [bool fallback = false]) => v is bool ? v : fallback;
+
+List<StaffMember> _staffList(Object? v, int open, int close) => v is List
+    ? v
+        .whereType<Map>()
+        .map((m) => StaffMember.fromMap(Map<String, dynamic>.from(m), open: open, close: close))
+        .where((m) => m.name.isNotEmpty)
+        .toList()
+    : <StaffMember>[];
+
+List<String> _stringList(Object? v) =>
+    v is List ? v.whereType<String>().toList() : <String>[];
+
+// -----------------------------------------------------------------------------
+// Usuario
+// -----------------------------------------------------------------------------
+
+/// Interfaz que la persona está usando en este momento.
+enum AppMode { client, business }
+
+AppMode _parseMode(Object? v) =>
+    v == AppMode.business.name ? AppMode.business : AppMode.client;
+
+/// Perfil guardado en `users/{uid}`.
+/// Una misma cuenta puede tener las dos interfaces (cliente y negocio).
+class UserProfile {
+  const UserProfile({
+    required this.uid,
     required this.name,
-    required this.minutes,
-    required this.price,
+    required this.email,
+    required this.isClient,
+    required this.isBusiness,
+    required this.mode,
   });
 
-  final String id;
+  final String uid;
   final String name;
-  final int minutes; // duración
-  final double price;
+  final String email; // correo de Gmail vinculado
+  final bool isClient;
+  final bool isBusiness;
+  final AppMode mode;
 
-  double get deposit => depositFor(price);
+  factory UserProfile.fromMap(String uid, Map<String, dynamic> m) {
+    return UserProfile(
+      uid: uid,
+      name: _string(m['name']),
+      email: _string(m['email']),
+      isClient: _bool(m['isClient'], true),
+      isBusiness: _bool(m['isBusiness']),
+      mode: _parseMode(m['mode']),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'name': name,
+        'email': email,
+        'isClient': isClient,
+        'isBusiness': isBusiness,
+        'mode': mode.name,
+      };
 }
 
-/// Persona que atiende en el negocio (barbero, estilista, etc.).
-class Professional {
-  const Professional({required this.id, required this.name});
+// -----------------------------------------------------------------------------
+// Negocio
+// -----------------------------------------------------------------------------
 
-  final String id;
-  final String name;
-}
-
-/// Reseña de un cliente.
-class Review {
-  const Review(this.author, this.stars, this.text);
-
-  final String author;
-  final int stars;
-  final String text;
-}
-
-enum BusinessCategory { barberias, esteticas, spas, unas }
+enum BusinessCategory { barberias, esteticas, spas, unas, otro }
 
 extension BusinessCategoryInfo on BusinessCategory {
   String get label => switch (this) {
@@ -49,6 +102,7 @@ extension BusinessCategoryInfo on BusinessCategory {
         BusinessCategory.esteticas => 'Estéticas',
         BusinessCategory.spas => 'Spas',
         BusinessCategory.unas => 'Uñas',
+        BusinessCategory.otro => 'Otros',
       };
 
   IconData get icon => switch (this) {
@@ -56,92 +110,535 @@ extension BusinessCategoryInfo on BusinessCategory {
         BusinessCategory.esteticas => Icons.face_retouching_natural,
         BusinessCategory.spas => Icons.spa,
         BusinessCategory.unas => Icons.brush,
+        BusinessCategory.otro => Icons.storefront,
+      };
+
+  /// Colores del degradado que se usa como portada.
+  List<Color> get colors => switch (this) {
+        BusinessCategory.barberias => const [Color(0xFF2A7D89), Color(0xFF0F4450)],
+        BusinessCategory.esteticas => const [Color(0xFFB37FA8), Color(0xFF1C6470)],
+        BusinessCategory.spas => const [Color(0xFF43B376), Color(0xFF1C6470)],
+        BusinessCategory.unas => const [Color(0xFFE38B6F), Color(0xFF1C6470)],
+        BusinessCategory.otro => const [Color(0xFF2B5FA3), Color(0xFF1C6470)],
       };
 }
 
-/// Un negocio registrado en Bookly.
+BusinessCategory parseCategory(Object? v) => BusinessCategory.values.firstWhere(
+      (c) => c.name == v,
+      orElse: () => BusinessCategory.otro,
+    );
+
+/// Colores que el negocio puede elegir para decorar su sitio.
+/// El índice 0 significa "según la categoría".
+const List<List<Color>> sitePalettes = [
+  [], // 0 = colores de la categoría
+  [Color(0xFF1C6470), Color(0xFF0F4450)], // turquesa Bookly
+  [Color(0xFF2B5FA3), Color(0xFF1B3B66)], // azul
+  [Color(0xFF2E9E5B), Color(0xFF1C6470)], // verde
+  [Color(0xFFB37FA8), Color(0xFF6D3B63)], // lila
+  [Color(0xFFE38B6F), Color(0xFFB0473A)], // coral
+  [Color(0xFF3A3A3A), Color(0xFF111111)], // negro
+  [Color(0xFFD9A441), Color(0xFF9C6B12)], // dorado
+];
+
+/// Persona que atiende en el negocio, con su propio horario.
+/// Ej. Evelyn trabaja de 10:00 a 16:00 y descansa los lunes.
+class StaffMember {
+  const StaffMember({
+    required this.name,
+    required this.startHour,
+    required this.endHour,
+    this.daysOff = const <int>{},
+  });
+
+  final String name;
+  final int startHour; // ej. 10 = 10:00
+  final int endHour; // ej. 16 = 16:00
+  final Set<int> daysOff; // DateTime.monday ... DateTime.sunday
+
+  bool worksOn(DateTime day) => !daysOff.contains(day.weekday);
+
+  String get hoursText => '$startHour:00 – $endHour:00';
+
+  factory StaffMember.fromMap(Map<String, dynamic> m, {int open = 9, int close = 19}) {
+    final off = m['daysOff'];
+    return StaffMember(
+      name: _string(m['name']),
+      startHour: _int(m['startHour'], open),
+      endHour: _int(m['endHour'], close),
+      daysOff: off is List ? off.whereType<num>().map((n) => n.toInt()).toSet() : <int>{},
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'name': name,
+        'startHour': startHour,
+        'endHour': endHour,
+        'daysOff': daysOff.toList()..sort(),
+      };
+}
+
+/// Negocio guardado en `businesses/{id}`.
+/// El id del negocio es el mismo uid de la cuenta dueña (un negocio por cuenta).
+///
+/// Tiene dos grupos de datos:
+///   - datos generales (nombre, dirección, horario...) → [basicMap]
+///   - diseño del sitio (portada, logo, color, textos, redes) → [siteMap]
 class Business {
   const Business({
     required this.id,
+    required this.ownerUid,
+    required this.ownerEmail,
     required this.name,
     required this.category,
     required this.address,
-    required this.distanceKm,
-    required this.rating,
-    required this.reviewCount,
+    required this.phone,
     required this.openHour,
     required this.closeHour,
     required this.closedWeekdays,
-    required this.services,
     required this.professionals,
-    required this.colors,
-    required this.videoCaption,
-    this.reviews = const [],
-    this.promo,
+    this.staffMembers = const [],
+    this.customCategory = '',
+    this.rating = 0,
+    this.demo = false,
+    this.slogan = '',
+    this.description = '',
+    this.themeIndex = 0,
+    this.logoBase64,
+    this.coverBase64,
+    this.whatsapp = '',
+    this.instagram = '',
+    this.facebook = '',
   });
 
   final String id;
+  final String ownerUid;
+  final String ownerEmail; // a este Gmail llegan los avisos de nuevas citas
   final String name;
   final BusinessCategory category;
   final String address;
-  final double distanceKm;
-  final double rating;
-  final int reviewCount;
+  final String phone;
   final int openHour; // ej. 10 = 10:00
   final int closeHour; // ej. 20 = 20:00
-  final Set<int> closedWeekdays; // DateTime.sunday, DateTime.monday...
-  final List<Service> services;
-  final List<Professional> professionals;
-  final List<Color> colors; // colores para las imágenes de ejemplo
-  final String videoCaption;
-  final List<Review> reviews;
-  final String? promo;
+  final Set<int> closedWeekdays; // DateTime.monday ... DateTime.sunday
+  final List<String> professionals; // solo nombres (versiones anteriores)
+  final List<StaffMember> staffMembers; // personal con su horario
+  final String customCategory; // tipo de negocio escrito a mano si eligió "Otros"
+  final double rating;
+  final bool demo; // negocios de ejemplo
+
+  // Diseño del sitio
+  final String slogan; // frase corta debajo del nombre
+  final String description; // "Acerca de nosotros"
+  final int themeIndex; // posición en [sitePalettes]
+  final String? logoBase64;
+  final String? coverBase64;
+  final String whatsapp;
+  final String instagram;
+  final String facebook;
+
+  /// Colores del sitio: los que eligió el negocio o los de su categoría.
+  List<Color> get colors {
+    if (themeIndex > 0 && themeIndex < sitePalettes.length) {
+      return sitePalettes[themeIndex];
+    }
+    return category.colors;
+  }
+
+  Color get accent => colors.first;
+
+  /// true cuando el negocio ya decoró algo de su sitio.
+  bool get hasSiteDesign =>
+      description.isNotEmpty || slogan.isNotEmpty || coverBase64 != null || logoBase64 != null;
+
+  /// Tipo de negocio para mostrar: el escrito a mano o el de la categoría.
+  String get categoryLabel =>
+      category == BusinessCategory.otro && customCategory.trim().isNotEmpty
+          ? customCategory.trim()
+          : category.label;
+
+  /// Personal con su horario. Si un negocio viejo solo guardó nombres,
+  /// cada persona trabaja el horario completo del negocio.
+  List<StaffMember> get team {
+    if (staffMembers.isNotEmpty) return staffMembers;
+    final names = professionals.isEmpty ? const ['Personal'] : professionals;
+    return [
+      for (final n in names)
+        StaffMember(name: n, startHour: openHour, endHour: closeHour),
+    ];
+  }
+
+  /// Nombres del personal.
+  List<String> get staff => [for (final m in team) m.name];
+
+  /// Busca a una persona del personal por nombre.
+  StaffMember? memberNamed(String name) {
+    for (final m in team) {
+      if (m.name == name) return m;
+    }
+    return null;
+  }
 
   bool isOpenOn(DateTime day) => !closedWeekdays.contains(day.weekday);
 
   bool isOpenAt(DateTime moment) =>
-      isOpenOn(moment) &&
-      moment.hour >= openHour &&
-      moment.hour < closeHour;
+      isOpenOn(moment) && moment.hour >= openHour && moment.hour < closeHour;
 
-  double get minPrice {
-    var min = services.first.price;
-    for (final s in services) {
-      if (s.price < min) min = s.price;
-    }
-    return min;
+  String get hoursText => '$openHour:00 – $closeHour:00';
+
+  factory Business.fromMap(String id, Map<String, dynamic> m) {
+    final closed = m['closedWeekdays'];
+    return Business(
+      id: id,
+      ownerUid: _string(m['ownerUid']),
+      ownerEmail: _string(m['ownerEmail']),
+      name: _string(m['name']),
+      category: parseCategory(m['category']),
+      address: _string(m['address']),
+      phone: _string(m['phone']),
+      openHour: _int(m['openHour'], 9),
+      closeHour: _int(m['closeHour'], 19),
+      closedWeekdays:
+          closed is List ? closed.whereType<num>().map((n) => n.toInt()).toSet() : <int>{},
+      professionals: _stringList(m['professionals']),
+      staffMembers: _staffList(m['staff'], _int(m['openHour'], 9), _int(m['closeHour'], 19)),
+      customCategory: _string(m['customCategory']),
+      rating: _double(m['rating']),
+      demo: _bool(m['demo']),
+      slogan: _string(m['slogan']),
+      description: _string(m['description']),
+      themeIndex: _int(m['themeIndex']),
+      logoBase64: _nullableString(m['logoBase64']),
+      coverBase64: _nullableString(m['coverBase64']),
+      whatsapp: _string(m['whatsapp']),
+      instagram: _string(m['instagram']),
+      facebook: _string(m['facebook']),
+    );
+  }
+
+  /// Datos generales (pantalla "Datos del negocio").
+  Map<String, dynamic> basicMap() => {
+        'ownerUid': ownerUid,
+        'ownerEmail': ownerEmail,
+        'name': name,
+        'category': category.name,
+        'address': address,
+        'phone': phone,
+        'openHour': openHour,
+        'closeHour': closeHour,
+        'closedWeekdays': closedWeekdays.toList()..sort(),
+        'professionals': staff,
+        'staff': [for (final m in staffMembers) m.toMap()],
+        'customCategory': customCategory,
+        'rating': rating,
+        'demo': demo,
+      };
+
+  /// Diseño del sitio (apartado "Mi sitio").
+  Map<String, dynamic> siteMap() => {
+        'slogan': slogan,
+        'description': description,
+        'themeIndex': themeIndex,
+        'logoBase64': logoBase64,
+        'coverBase64': coverBase64,
+        'whatsapp': whatsapp,
+        'instagram': instagram,
+        'facebook': facebook,
+      };
+
+  Map<String, dynamic> toMap() => {...basicMap(), ...siteMap()};
+
+  /// Copia del negocio con otro diseño de sitio (para la vista previa).
+  Business withSite({
+    required String slogan,
+    required String description,
+    required int themeIndex,
+    required String? logoBase64,
+    required String? coverBase64,
+    required String whatsapp,
+    required String instagram,
+    required String facebook,
+  }) {
+    return Business(
+      id: id,
+      ownerUid: ownerUid,
+      ownerEmail: ownerEmail,
+      name: name,
+      category: category,
+      address: address,
+      phone: phone,
+      openHour: openHour,
+      closeHour: closeHour,
+      closedWeekdays: closedWeekdays,
+      professionals: professionals,
+      staffMembers: staffMembers,
+      customCategory: customCategory,
+      rating: rating,
+      demo: demo,
+      slogan: slogan,
+      description: description,
+      themeIndex: themeIndex,
+      logoBase64: logoBase64,
+      coverBase64: coverBase64,
+      whatsapp: whatsapp,
+      instagram: instagram,
+      facebook: facebook,
+    );
   }
 }
 
-enum AppointmentStatus { confirmada, cancelada }
+/// Foto de la galería del sitio: `businesses/{id}/gallery/{photoId}`.
+class GalleryPhoto {
+  const GalleryPhoto({required this.id, required this.imageBase64, this.createdAt});
 
-/// Una cita agendada.
-class Appointment {
-  Appointment({
+  final String id;
+  final String imageBase64;
+  final DateTime? createdAt;
+
+  factory GalleryPhoto.fromMap(String id, Map<String, dynamic> m) => GalleryPhoto(
+        id: id,
+        imageBase64: _string(m['imageBase64']),
+        createdAt: readDate(m['createdAt']),
+      );
+}
+
+// -----------------------------------------------------------------------------
+// Productos y servicios (inventario)
+// -----------------------------------------------------------------------------
+
+/// Un servicio se puede agendar (tiene duración).
+/// Un producto se vende en el negocio (tiene existencias).
+enum ItemKind { servicio, producto }
+
+ItemKind _parseKind(Object? v) =>
+    v == ItemKind.producto.name ? ItemKind.producto : ItemKind.servicio;
+
+/// Elemento del inventario: `businesses/{id}/items/{itemId}`.
+class Item {
+  const Item({
     required this.id,
-    required this.business,
-    required this.service,
-    required this.professional,
-    required this.start,
-    required this.clientName,
-    this.note = '',
-    this.depositPaid = 0,
-    this.fromCurrentUser = false,
-    this.status = AppointmentStatus.confirmada,
+    required this.kind,
+    required this.name,
+    required this.price,
+    this.description = '',
+    this.minutes = 60,
+    this.stock = 0,
+    this.imageBase64,
+    this.active = true,
+  });
+
+  final String id; // vacío cuando todavía no se guarda
+  final ItemKind kind;
+  final String name;
+  final String description;
+  final double price;
+  final int minutes; // solo servicios
+  final int stock; // solo productos
+  final String? imageBase64; // imagen comprimida guardada como texto
+  final bool active; // si se muestra a los clientes
+
+  bool get isService => kind == ItemKind.servicio;
+  double get deposit => depositFor(price);
+
+  factory Item.fromMap(String id, Map<String, dynamic> m) {
+    return Item(
+      id: id,
+      kind: _parseKind(m['kind']),
+      name: _string(m['name']),
+      description: _string(m['description']),
+      price: _double(m['price']),
+      minutes: _int(m['minutes'], 60),
+      stock: _int(m['stock']),
+      imageBase64: _nullableString(m['imageBase64']),
+      active: _bool(m['active'], true),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'kind': kind.name,
+        'name': name,
+        'description': description,
+        'price': price,
+        'minutes': minutes,
+        'stock': stock,
+        'imageBase64': imageBase64,
+        'active': active,
+      };
+}
+
+// -----------------------------------------------------------------------------
+// Publicaciones
+// -----------------------------------------------------------------------------
+
+/// Publicación de un negocio: `posts/{id}`.
+class Post {
+  const Post({
+    required this.id,
+    required this.businessId,
+    required this.businessName,
+    required this.category,
+    required this.text,
+    this.imageBase64,
+    this.createdAt,
   });
 
   final String id;
-  final Business business;
-  final Service service;
-  Professional professional; // puede cambiar al reprogramar
-  DateTime start; // puede cambiar al reprogramar
-  final String clientName;
-  final String note;
-  final double depositPaid;
-  final bool fromCurrentUser; // true = la hizo la usuaria de la app
-  AppointmentStatus status;
+  final String businessId;
+  final String businessName;
+  final BusinessCategory category;
+  final String text;
+  final String? imageBase64;
+  final DateTime? createdAt;
 
-  DateTime get end => start.add(Duration(minutes: service.minutes));
-  double get remaining => service.price - depositPaid;
-  bool get isCancelled => status == AppointmentStatus.cancelada;
+  factory Post.fromMap(String id, Map<String, dynamic> m) {
+    return Post(
+      id: id,
+      businessId: _string(m['businessId']),
+      businessName: _string(m['businessName']),
+      category: parseCategory(m['category']),
+      text: _string(m['text']),
+      imageBase64: _nullableString(m['imageBase64']),
+      createdAt: readDate(m['createdAt']),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'businessId': businessId,
+        'businessName': businessName,
+        'category': category.name,
+        'text': text,
+        'imageBase64': imageBase64,
+      };
 }
+
+// -----------------------------------------------------------------------------
+// Citas
+// -----------------------------------------------------------------------------
+
+enum AppointmentStatus { confirmada, cancelada }
+
+/// Cita agendada: `appointments/{id}`.
+class Appointment {
+  const Appointment({
+    required this.id,
+    required this.businessId,
+    required this.businessName,
+    required this.ownerEmail,
+    required this.itemId,
+    required this.serviceName,
+    required this.minutes,
+    required this.price,
+    required this.depositPaid,
+    required this.professional,
+    required this.start,
+    required this.clientName,
+    required this.clientEmail,
+    this.clientUid,
+    this.clientPhone = '',
+    this.note = '',
+    this.status = AppointmentStatus.confirmada,
+    this.createdByBusiness = false,
+  });
+
+  final String id;
+  final String businessId;
+  final String businessName;
+  final String ownerEmail;
+  final String itemId;
+  final String serviceName;
+  final int minutes;
+  final double price;
+  final double depositPaid;
+  final String professional;
+  final DateTime start;
+  final String? clientUid; // null si el negocio agregó al cliente a mano
+  final String clientName;
+  final String clientEmail; // con este correo el cliente ve la cita en su app
+  final String clientPhone;
+  final String note;
+  final AppointmentStatus status;
+  final bool createdByBusiness;
+
+  DateTime get end => start.add(Duration(minutes: minutes));
+  double get remaining => price - depositPaid;
+  bool get isCancelled => status == AppointmentStatus.cancelada;
+
+  factory Appointment.fromMap(String id, Map<String, dynamic> m) {
+    return Appointment(
+      id: id,
+      businessId: _string(m['businessId']),
+      businessName: _string(m['businessName']),
+      ownerEmail: _string(m['ownerEmail']),
+      itemId: _string(m['itemId']),
+      serviceName: _string(m['serviceName']),
+      minutes: _int(m['minutes'], 60),
+      price: _double(m['price']),
+      depositPaid: _double(m['depositPaid']),
+      professional: _string(m['professional']),
+      start: readDate(m['start']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+      clientUid: _nullableString(m['clientUid']),
+      clientName: _string(m['clientName']),
+      clientEmail: _string(m['clientEmail']),
+      clientPhone: _string(m['clientPhone']),
+      note: _string(m['note']),
+      status: m['status'] == AppointmentStatus.cancelada.name
+          ? AppointmentStatus.cancelada
+          : AppointmentStatus.confirmada,
+      createdByBusiness: _bool(m['createdByBusiness']),
+    );
+  }
+
+  /// [day] se guarda como texto ("2026-11-05") para buscar las citas de un día.
+  Map<String, dynamic> toMap() => {
+        'businessId': businessId,
+        'businessName': businessName,
+        'ownerEmail': ownerEmail,
+        'itemId': itemId,
+        'serviceName': serviceName,
+        'minutes': minutes,
+        'price': price,
+        'depositPaid': depositPaid,
+        'professional': professional,
+        'start': Timestamp.fromDate(start),
+        'day': dayKey(start),
+        'clientUid': clientUid,
+        'clientName': clientName,
+        'clientEmail': clientEmail.toLowerCase(),
+        'clientPhone': clientPhone,
+        'note': note,
+        'status': status.name,
+        'createdByBusiness': createdByBusiness,
+      };
+
+  Appointment copyWith({
+    String? id,
+    DateTime? start,
+    String? professional,
+    AppointmentStatus? status,
+  }) {
+    return Appointment(
+      id: id ?? this.id,
+      businessId: businessId,
+      businessName: businessName,
+      ownerEmail: ownerEmail,
+      itemId: itemId,
+      serviceName: serviceName,
+      minutes: minutes,
+      price: price,
+      depositPaid: depositPaid,
+      professional: professional ?? this.professional,
+      start: start ?? this.start,
+      clientUid: clientUid,
+      clientName: clientName,
+      clientEmail: clientEmail,
+      clientPhone: clientPhone,
+      note: note,
+      status: status ?? this.status,
+      createdByBusiness: createdByBusiness,
+    );
+  }
+}
+
+/// Clave de día: 2026-11-05.
+String dayKey(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
