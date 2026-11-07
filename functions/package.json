@@ -1,0 +1,19 @@
+{
+  "name": "bookly-functions",
+  "description": "Servidor de pagos de Bookly (Cloud Functions + Stripe)",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "deploy": "firebase deploy --only functions,firestore:rules",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.0.0",
+    "firebase-functions": "^7.0.0",
+    "stripe": "^23.0.0"
+  }
+}

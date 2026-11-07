@@ -59,17 +59,20 @@ bool overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) =>
     aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
 
 /// ¿[professional] está libre de [start] a [start] + [minutes]?
-/// Se ignoran las citas canceladas y la cita [ignoreId] (al reprogramar).
+/// Se ignoran las citas canceladas, los apartados sin pagar que ya vencieron
+/// y la cita [ignoreId] (al reprogramar).
 bool isProfessionalFree({
   required String professional,
   required DateTime start,
   required int minutes,
   required Iterable<Appointment> existing,
   String? ignoreId,
+  DateTime? now,
 }) {
   final end = start.add(Duration(minutes: minutes));
+  final reference = now ?? DateTime.now();
   for (final a in existing) {
-    if (a.id == ignoreId || a.isCancelled) continue;
+    if (a.id == ignoreId || !a.blocksSlot(reference)) continue;
     if (a.professional != professional) continue;
     if (overlaps(a.start, a.end, start, end)) return false;
   }
@@ -100,6 +103,7 @@ String? findProfessional({
       minutes: minutes,
       existing: existing,
       ignoreId: ignoreId,
+      now: now,
     );
     if (free) return p;
   }
@@ -118,7 +122,7 @@ bool isRefundable(Appointment a, DateTime now) =>
   final upcoming = <Appointment>[];
   final history = <Appointment>[];
   for (final a in all) {
-    if (!a.isCancelled && a.end.isAfter(now)) {
+    if (a.blocksSlot(now) && a.end.isAfter(now)) {
       upcoming.add(a);
     } else {
       history.add(a);

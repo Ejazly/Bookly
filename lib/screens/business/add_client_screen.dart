@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../logic/schedule.dart';
 import '../../models/models.dart';
 import '../../services/database.dart';
 import '../../services/email_service.dart';
+import '../../services/payments_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/format.dart';
 import '../../widgets/common.dart';
@@ -91,17 +91,36 @@ class _AddClientScreenState extends State<AddClientScreen> {
     }
     setState(() => _saving = true);
     try {
-      final a = await Database.instance.book(
-        business: widget.business,
-        service: service,
+      // El servidor revisa el horario y guarda la cita (nadie más puede
+      // escribir citas directamente en la base de datos).
+      final pro = await Payments.addManualAppointment(
+        itemId: service.id,
+        start: time,
+        professional: _pro,
+        clientName: _name.text.trim(),
+        clientEmail: _email.text.trim().toLowerCase(),
+        clientPhone: _phone.text.trim(),
+        note: _note.text.trim(),
+        depositPaid: deposit,
+      );
+      final b = widget.business;
+      final a = Appointment(
+        id: '',
+        businessId: b.id,
+        businessName: b.name,
+        ownerEmail: b.ownerEmail,
+        itemId: service.id,
+        serviceName: service.name,
+        minutes: service.minutes,
+        price: service.price,
+        depositPaid: deposit,
+        professional: pro,
         start: time,
         clientName: _name.text.trim(),
-        clientEmail: _email.text.trim(),
+        clientEmail: _email.text.trim().toLowerCase(),
         clientPhone: _phone.text.trim(),
-        preferredProfessional: _pro,
         note: _note.text.trim(),
         createdByBusiness: true,
-        depositPaid: deposit,
       );
       final sent = await EmailService.notifyClientAdded(a);
       if (!mounted) return;
@@ -112,10 +131,8 @@ class _AddClientScreenState extends State<AddClientScreen> {
             : 'Cita agregada para ${a.clientName} el ${shortDate(a.start)} a las ${hhmm(a.start)}.',
       );
       Navigator.of(context).pop();
-    } on BookingException catch (e) {
+    } on PaymentException catch (e) {
       if (mounted) showMessage(context, e.message);
-    } catch (e) {
-      if (mounted) showMessage(context, 'No se pudo guardar: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

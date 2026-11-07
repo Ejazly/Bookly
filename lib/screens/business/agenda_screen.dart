@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/models.dart';
 import '../../services/database.dart';
 import '../../services/email_service.dart';
+import '../../services/payments_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/format.dart';
 import '../../widgets/common.dart';
@@ -63,22 +64,32 @@ class _AgendaScreenState extends State<AgendaScreen> {
     final contactNote = a.clientEmail.isNotEmpty
         ? 'Le avisaremos por correo a ${a.clientEmail}.'
         : 'Esta persona no tiene correo registrado; avísale por teléfono.';
+    final refundNote = a.depositPaid > 0 && !a.createdByBusiness
+        ? '\nSe le devolverá el anticipo de ${money2(a.depositPaid)} que pagó en la app.'
+        : '';
     final ok = await confirmDialog(
       context,
       title: '¿Cancelar la cita de ${a.clientName}?',
-      message: '${a.serviceName} · ${shortDate(a.start)} ${hhmm(a.start)}.\n$contactNote',
+      message: '${a.serviceName} · ${shortDate(a.start)} ${hhmm(a.start)}.\n$contactNote$refundNote',
       confirmLabel: 'Cancelar cita',
       color: AppColors.red,
     );
     if (!ok) return;
     try {
-      await Database.instance.cancel(a);
+      final refunded = await Payments.cancelAppointment(a.id);
       final sent = await EmailService.notifyCancelledByBusiness(a);
       if (mounted) {
-        showMessage(context, sent ? 'Cita cancelada. Se avisó al cliente.' : 'Cita cancelada.');
+        showMessage(
+          context,
+          [
+            'Cita cancelada.',
+            if (refunded > 0) 'Se reembolsaron ${money2(refunded)} al cliente.',
+            if (sent) 'Se le avisó por correo.',
+          ].join(' '),
+        );
       }
-    } catch (e) {
-      if (mounted) showMessage(context, 'No se pudo cancelar: $e');
+    } on PaymentException catch (e) {
+      if (mounted) showMessage(context, e.message);
     }
   }
 
@@ -214,11 +225,20 @@ class _AgendaScreenState extends State<AgendaScreen> {
         stream: isDay ? _dayStream : _upcomingStream,
         builder: (context, snapshot) {
           final all = snapshot.data ?? const <Appointment>[];
-          final active = all.where((a) => !a.isCancelled && _matchesOrigin(a)).toList();
-          final cancelled = all.where((a) => a.isCancelled && _matchesOrigin(a)).toList();
-          final withDeposit = active.where((a) => a.depositPaid > 0).length;
-          final deposits = active.fold<double>(0, (sum, a) => sum + a.depositPaid);
-          final pending = active.fold<double>(0, (sum, a) => sum + a.remaining);
+          final now = DateTime.now();
+          // Confirmadas, o apartadas mientras el cliente termina de pagar.
+          final active = all.where((a) => a.blocksSlot(now) && _matchesOrigin(a)).toList();
+          // Los pagos que no se completaron no se muestran (nunca fueron citas).
+          final cancelled = all
+              .where((a) =>
+                  (a.status == AppointmentStatus.cancelada ||
+                      a.status == AppointmentStatus.reembolsada) &&
+                  _matchesOrigin(a))
+              .toList();
+          final confirmed = active.where((a) => !a.isPending).toList();
+          final withDeposit = confirmed.where((a) => a.depositPaid > 0).length;
+          final deposits = confirmed.fold<double>(0, (sum, a) => sum + a.depositPaid);
+          final pending = confirmed.fold<double>(0, (sum, a) => sum + a.remaining);
 
           return ListView(
             padding: const EdgeInsets.only(bottom: 90),
@@ -328,10 +348,13 @@ class _AgendaTile extends StatelessWidget {
         ? const StatusBadge('Agregada por ti',
             color: AppColors.blue, background: Color(0xFFE3ECF7))
         : const StatusBadge('Reservó en la app');
-    final StatusBadge deposit = a.depositPaid > 0
-        ? StatusBadge('Anticipo ${money2(a.depositPaid)}')
-        : const StatusBadge('Sin anticipo',
-            color: Color(0xFFB57511), background: AppColors.amberSoft);
+    final StatusBadge deposit = a.isPending
+        ? const StatusBadge('Pagando anticipo…',
+            color: Color(0xFFB57511), background: AppColors.amberSoft)
+        : a.depositPaid > 0
+            ? StatusBadge('Anticipo ${money2(a.depositPaid)}')
+            : const StatusBadge('Sin anticipo',
+                color: Color(0xFFB57511), background: AppColors.amberSoft);
 
     return AppCard(
       padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
@@ -376,6 +399,9 @@ class _AgendaTile extends StatelessWidget {
               ],
             ),
           ),
+          if (a.isPending)
+            const SizedBox(width: 12)
+          else
           PopupMenuButton<String>(
             tooltip: 'Opciones',
             onSelected: (v) {

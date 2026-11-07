@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../data/sample_data.dart';
-import '../logic/schedule.dart';
 import '../models/models.dart';
 
 /// Todas las lecturas y escrituras a Cloud Firestore pasan por aquí.
@@ -11,7 +10,11 @@ import '../models/models.dart';
 ///   businesses/{uid}                 datos del negocio (id = uid del dueño)
 ///   businesses/{uid}/items/{itemId}  inventario: servicios y productos
 ///   posts/{postId}                   publicaciones de los negocios
-///   appointments/{id}                citas
+///   appointments/{id}                citas (solo las escribe el servidor)
+///   businesses/{uid}/busy/{id}       horarios ocupados, sin datos personales
+///   orders/{id}                      compras de productos
+///   paymentStatus/{uid}              si el negocio ya cobra en línea
+///   users|businesses/.../movements   pagos, ventas y reembolsos
 class Database {
   Database._();
 
@@ -208,91 +211,72 @@ class Database {
       .snapshots()
       .map(_appointmentsFrom);
 
-  /// Guarda una cita nueva después de volver a revisar que el horario
-  /// siga libre (alguien más pudo ganarlo mientras se pagaba).
-  Future<Appointment> book({
-    required Business business,
-    required Item service,
-    required DateTime start,
-    required String clientName,
-    required String clientEmail,
-    String? clientUid,
-    String clientPhone = '',
-    String? preferredProfessional,
-    String note = '',
-    bool createdByBusiness = false,
-    double? depositPaid,
-  }) async {
-    final existing = await fetchAppointmentsForDay(business.id, start);
-    final pro = findProfessional(
-      business: business,
-      start: start,
-      minutes: service.minutes,
-      existing: existing,
-      now: DateTime.now(),
-      preferred: preferredProfessional,
-    );
-    if (pro == null) {
-      throw BookingException('Ese horario ya no está disponible. Por favor elige otro.');
-    }
-    final appointment = Appointment(
-      id: '',
-      businessId: business.id,
-      businessName: business.name,
-      ownerEmail: business.ownerEmail,
-      itemId: service.id,
-      serviceName: service.name,
-      minutes: service.minutes,
-      price: service.price,
-      // Desde la app se paga el 25 %. Si agenda el negocio, registra el
-      // anticipo que recibió (o 0 si se paga todo en el local).
-      depositPaid: depositPaid ?? (createdByBusiness ? 0 : service.deposit),
-      professional: pro,
-      start: start,
-      clientUid: clientUid,
-      clientName: clientName,
-      clientEmail: clientEmail.trim().toLowerCase(),
-      clientPhone: clientPhone,
-      note: note,
-      createdByBusiness: createdByBusiness,
-    );
-    final ref = await _appointments.add({
-      ...appointment.toMap(),
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    return appointment.copyWith(id: ref.id);
+  /// Una sola cita (para ver en vivo cuándo se confirma el pago).
+  Stream<Appointment?> appointmentStream(String id) =>
+      _appointments.doc(id).snapshots().map((s) {
+        final data = s.data();
+        return data == null ? null : Appointment.fromMap(s.id, data);
+      });
+
+  /// Horarios ocupados de un negocio en un día, SIN datos de los clientes.
+  /// Los escribe el servidor en `businesses/{id}/busy` para que cualquier
+  /// cliente sepa qué está libre sin poder ver quién reservó.
+  Stream<List<Appointment>> busyForDay(String businessId, DateTime day) => _businesses
+      .doc(businessId)
+      .collection('busy')
+      .where('day', isEqualTo: dayKey(day))
+      .snapshots()
+      .map(_appointmentsFrom);
+
+  // Crear, cancelar y reprogramar citas ya NO se hace aquí: lo hace el
+  // servidor (ver services/payments_service.dart), porque involucra dinero.
+
+  // ---------------------------------------------------------------------------
+  // Pagos (solo lectura: todo lo escribe el servidor)
+  // ---------------------------------------------------------------------------
+
+  CollectionReference<Map<String, dynamic>> get _orders => _db.collection('orders');
+
+  /// ¿El negocio ya puede cobrar en línea?
+  Stream<PayoutStatus> payoutStatusStream(String businessId) => _db
+      .collection('paymentStatus')
+      .doc(businessId)
+      .snapshots()
+      .map((s) => PayoutStatus.fromMap(s.data()));
+
+  Stream<ShopOrder?> orderStream(String id) => _orders.doc(id).snapshots().map((s) {
+        final data = s.data();
+        return data == null ? null : ShopOrder.fromMap(s.id, data);
+      });
+
+  List<ShopOrder> _ordersFrom(QuerySnapshot<Map<String, dynamic>> q) {
+    final list = q.docs.map((d) => ShopOrder.fromMap(d.id, d.data())).toList();
+    final far = DateTime(9999);
+    list.sort((a, b) => (b.createdAt ?? far).compareTo(a.createdAt ?? far));
+    return list;
   }
 
-  Future<void> cancel(Appointment a) =>
-      _appointments.doc(a.id).update({'status': AppointmentStatus.cancelada.name});
+  /// Compras que hizo una persona.
+  Stream<List<ShopOrder>> ordersForBuyer(String uid) =>
+      _orders.where('buyerUid', isEqualTo: uid).snapshots().map(_ordersFrom);
 
-  /// Cambia la fecha y hora. Regresa la cita ya actualizada.
-  Future<Appointment> reschedule({
-    required Appointment appointment,
-    required Business business,
-    required DateTime newStart,
-    String? preferredProfessional,
-  }) async {
-    final existing = await fetchAppointmentsForDay(business.id, newStart);
-    final pro = findProfessional(
-      business: business,
-      start: newStart,
-      minutes: appointment.minutes,
-      existing: existing,
-      now: DateTime.now(),
-      preferred: preferredProfessional,
-      ignoreId: appointment.id,
-    );
-    if (pro == null) {
-      throw BookingException('Ese horario ya no está disponible. Por favor elige otro.');
-    }
-    await _appointments.doc(appointment.id).update({
-      'start': Timestamp.fromDate(newStart),
-      'day': dayKey(newStart),
-      'professional': pro,
-    });
-    return appointment.copyWith(start: newStart, professional: pro);
-  }
+  /// Ventas de un negocio.
+  Stream<List<ShopOrder>> ordersForBusiness(String businessId) =>
+      _orders.where('businessId', isEqualTo: businessId).snapshots().map(_ordersFrom);
+
+  Stream<List<Movement>> _movements(CollectionReference<Map<String, dynamic>> ref) => ref
+      .orderBy('createdAt', descending: true)
+      .limit(50)
+      .snapshots()
+      .map((q) => q.docs.map((d) => Movement.fromMap(d.id, d.data())).toList());
+
+  /// Pagos y reembolsos del cliente.
+  Stream<List<Movement>> userMovements(String uid) =>
+      _movements(_users.doc(uid).collection('movements'));
+
+  /// Ingresos del negocio (con la comisión de Bookly).
+  Stream<List<Movement>> businessMovements(String businessId) =>
+      _movements(_businesses.doc(businessId).collection('movements'));
 
   // ---------------------------------------------------------------------------
   // Datos de ejemplo

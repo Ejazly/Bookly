@@ -17,6 +17,10 @@ dependencies:
   image_picker: ^1.2.0
   # Enviar los correos de aviso por medio de EmailJS
   http: ^1.5.0
+  # Pagos seguros: la app llama al servidor (Cloud Functions) y abre la
+  # página de pago de Stripe. La app nunca ve los datos de la tarjeta.
+  cloud_functions: ^7.0.0
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../models/models.dart';
-import '../../services/email_service.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/format.dart';
@@ -9,8 +8,9 @@ import '../../widgets/common.dart';
 import '../../widgets/site_widgets.dart';
 import '../business_setup_screen.dart';
 import '../profile_screen.dart';
+import 'payouts_screen.dart';
 
-/// Apartado "Cuenta" del negocio: datos del negocio, avisos por correo y
+/// Apartado "Cuenta" del negocio: datos del negocio y
 /// el botón para cambiar a la interfaz de cliente.
 class BusinessProfileScreen extends StatelessWidget {
   const BusinessProfileScreen({super.key, required this.business});
@@ -89,27 +89,21 @@ class BusinessProfileScreen extends StatelessWidget {
               ],
             ),
           ),
-          const SectionLabel('Avisos por correo'),
+          const SectionLabel('Cobros'),
           AppCard(
-            color: EmailService.isConfigured ? AppColors.greenSoft : AppColors.amberSoft,
-            child: Row(
-              children: [
-                Icon(
-                  EmailService.isConfigured
-                      ? Icons.mark_email_read_outlined
-                      : Icons.warning_amber_rounded,
-                  color: EmailService.isConfigured ? AppColors.green : const Color(0xFFB57511),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    EmailService.isConfigured
-                        ? 'Cada vez que un cliente agende, cancele o cambie su cita te llegará un correo a ${b.ownerEmail}.'
-                        : 'Los correos aún no están configurados (falta EmailJS en lib/config/email_config.dart).',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ),
-              ],
+            padding: EdgeInsets.zero,
+            child: ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: AppColors.greenSoft,
+                child: Icon(Icons.payments_outlined, color: AppColors.green),
+              ),
+              title: const Text('Cobros y ventas',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Recibe anticipos y ventas con Stripe'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => PayoutsScreen(business: b)),
+              ),
             ),
           ),
           const SectionLabel('Cambiar de interfaz'),

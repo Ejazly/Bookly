@@ -320,4 +320,67 @@ void main() {
       expect(p.mode, AppMode.business);
     });
   });
+
+  group('Pagos', () {
+    test('lee los estados que escribe el servidor', () {
+      expect(AppointmentStatus.parse('pendiente_pago'), AppointmentStatus.pendientePago);
+      expect(AppointmentStatus.parse('reembolsada'), AppointmentStatus.reembolsada);
+      expect(AppointmentStatus.parse('expirada').label, 'Pago no completado');
+      // Citas viejas sin estado se toman como confirmadas.
+      expect(AppointmentStatus.parse(null), AppointmentStatus.confirmada);
+    });
+
+    test('un apartado sin pagar ocupa el horario solo mientras no vence', () {
+      final t = DateTime(2026, 10, 27, 12);
+      Appointment apartada(DateTime vence) => Appointment.fromMap('p1', {
+            'professional': 'Luis',
+            'start': Timestamp.fromDate(t),
+            'minutes': 60,
+            'status': 'pendiente_pago',
+            'holdExpiresAt': Timestamp.fromDate(vence),
+          });
+      final vigente = apartada(now.add(const Duration(minutes: 20)));
+      final vencida = apartada(now.subtract(const Duration(minutes: 1)));
+      expect(vigente.blocksSlot(now), isTrue);
+      expect(vencida.blocksSlot(now), isFalse);
+      expect(
+        isProfessionalFree(
+            professional: 'Luis', start: t, minutes: 60, existing: [vigente], now: now),
+        isFalse,
+      );
+      expect(
+        isProfessionalFree(
+            professional: 'Luis', start: t, minutes: 60, existing: [vencida], now: now),
+        isTrue,
+      );
+    });
+
+    test('las citas reembolsadas o con pago no completado no ocupan horario', () {
+      final t = DateTime(2026, 10, 27, 12);
+      for (final s in [AppointmentStatus.reembolsada, AppointmentStatus.expirada]) {
+        final a = cita(id: 'x', start: t, professional: 'Luis', status: s);
+        expect(a.isCancelled, isTrue);
+        expect(a.blocksSlot(now), isFalse);
+      }
+    });
+
+    test('lee montos en centavos del servidor', () {
+      expect(fromCents(5750), 57.5);
+      final o = ShopOrder.fromMap('o1', {
+        'itemName': 'Cera',
+        'quantity': 2,
+        'totalCents': 36000,
+        'status': 'pagada',
+      });
+      expect(o.isPaid, isTrue);
+      expect(fromCents(o.totalCents), 360);
+      final m = Movement.fromMap('m1', {
+        'type': 'anticipo',
+        'grossCents': 5750,
+        'feeCents': 288,
+        'netCents': 5462,
+      });
+      expect(m.grossCents - m.feeCents, m.netCents);
+    });
+  });
 }

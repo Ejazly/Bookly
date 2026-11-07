@@ -30,7 +30,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
   late final TextEditingController _stock =
       TextEditingController(text: '${widget.existing?.stock ?? 0}');
 
-  late ItemKind _kind = widget.existing?.kind ?? ItemKind.producto;
+  late ItemKind _kind = widget.existing?.kind ?? ItemKind.servicio;
   late int _minutes = widget.existing?.minutes ?? 60;
   late String? _image = widget.existing?.imageBase64;
   late bool _active = widget.existing?.active ?? true;
@@ -65,7 +65,9 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
     try {
       await Database.instance.saveItem(widget.business.id, item);
       if (!mounted) return;
-      showMessage(context, widget.existing == null ? 'Producto agregado.' : 'Cambios guardados.');
+      showMessage(context, widget.existing == null
+          ? (_kind == ItemKind.servicio ? 'Servicio agregado.' : 'Producto agregado.')
+          : 'Cambios guardados.');
       Navigator.of(context).pop();
     } catch (e) {
       if (mounted) showMessage(context, 'No se pudo guardar: $e');
@@ -102,7 +104,9 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isNew ? 'Nuevo producto' : 'Editar'),
+        title: Text(isNew
+            ? (isService ? 'Nuevo servicio' : 'Nuevo producto')
+            : (isService ? 'Editar servicio' : 'Editar producto')),
         actions: [
           if (!isNew)
             IconButton(
@@ -117,17 +121,18 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(18, 4, 18, 28),
           children: [
+            const SectionLabel('¿Qué vas a agregar?'),
             SegmentedButton<ItemKind>(
               segments: const [
-                ButtonSegment(
-                  value: ItemKind.producto,
-                  icon: Icon(Icons.shopping_bag_outlined),
-                  label: Text('Producto'),
-                ),
                 ButtonSegment(
                   value: ItemKind.servicio,
                   icon: Icon(Icons.content_cut),
                   label: Text('Servicio'),
+                ),
+                ButtonSegment(
+                  value: ItemKind.producto,
+                  icon: Icon(Icons.shopping_bag_outlined),
+                  label: Text('Producto'),
                 ),
               ],
               selected: {_kind},
@@ -136,8 +141,8 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
             const SizedBox(height: 6),
             Text(
               isService
-                  ? 'Los servicios se pueden agendar (corte, masaje, uñas...).'
-                  : 'Los productos se venden en el negocio y llevan control de existencias.',
+                  ? 'Servicio: algo que se agenda, como un corte o un masaje. Lleva precio y duración.'
+                  : 'Producto: algo que vendes en el negocio, como un shampoo. Lleva precio y piezas en inventario.',
               style: const TextStyle(color: AppColors.muted, fontSize: 12),
             ),
             const SectionLabel('Imagen'),

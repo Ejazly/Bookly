@@ -242,6 +242,7 @@ class StaffSlotPicker extends StatelessWidget {
                 minutes: minutes,
                 existing: existing,
                 ignoreId: ignoreId,
+                now: now,
               ))
             t,
       ];

@@ -46,3 +46,11 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Servidor (Cloud Functions) y Firebase CLI
+functions/node_modules/
+.firebase/
+firebase-debug.log
+firestore-debug.log
+*.local
+.env

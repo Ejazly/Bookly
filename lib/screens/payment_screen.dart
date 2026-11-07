@@ -1,24 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import '../logic/schedule.dart';
 import '../models/models.dart';
 import '../services/database.dart';
 import '../services/email_service.dart';
+import '../services/payments_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../utils/format.dart';
 import '../widgets/common.dart';
-
-enum _Method { card, mercadoPago }
-
-/// Tarjeta que simula un pago rechazado (igual que las tarjetas de prueba de Stripe).
-const String declinedTestCard = '4000000000000002';
+import 'checkout_wait_screen.dart';
 
 /// Pantalla 3.7: Pago del anticipo (25 %).
 ///
-/// En esta versión el pago es SIMULADO: no se cobra nada. Más adelante
-/// aquí se conectará Mercado Pago o Stripe en modo de prueba.
+/// Seguridad:
+///  - La app NO pide ni ve los datos de la tarjeta: el pago se hace en la
+///    página segura de Stripe (modo de prueba).
+///  - El monto lo calcula el SERVIDOR con el precio guardado en la base de
+///    datos; aunque alguien modifique la app no puede pagar menos.
+///  - El servidor vuelve a revisar que el horario siga libre y lo aparta
+///    30 minutos mientras se paga.
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({
     super.key,
@@ -32,7 +32,7 @@ class PaymentScreen extends StatefulWidget {
   final Business business;
   final Item service;
   final DateTime start;
-  final String? preferred; // null = cualquiera
+  final String? preferred; // quién atiende (elegido con el horario)
   final String note;
 
   @override
@@ -40,111 +40,69 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _number = TextEditingController();
-  final _holder = TextEditingController();
-  final _expiry = TextEditingController();
-  final _cvv = TextEditingController();
-  _Method _method = _Method.card;
+  late final Stream<PayoutStatus> _payout =
+      Database.instance.payoutStatusStream(widget.business.id);
   bool _paying = false;
 
-  @override
-  void dispose() {
-    _number.dispose();
-    _holder.dispose();
-    _expiry.dispose();
-    _cvv.dispose();
-    super.dispose();
-  }
-
-  String? _validateNumber(String? v) {
-    final digits = (v ?? '').replaceAll(' ', '');
-    return RegExp(r'^\d{16}$').hasMatch(digits)
-        ? null
-        : 'El número debe tener 16 dígitos';
-  }
-
-  String? _validateExpiry(String? v) {
-    final match = RegExp(r'^(0[1-9]|1[0-2])/(\d{2})$').firstMatch((v ?? '').trim());
-    if (match == null) return 'Usa el formato MM/AA';
-    final month = int.parse(match.group(1)!);
-    final year = 2000 + int.parse(match.group(2)!);
-    final now = DateTime.now();
-    // La tarjeta vence al terminar el mes indicado.
-    final expires = DateTime(year, month + 1);
-    if (!expires.isAfter(now)) return 'La tarjeta está vencida';
-    return null;
-  }
+  bool get _isDemo => widget.business.demo;
 
   Future<void> _pay() async {
-    if (_method == _Method.card && !_formKey.currentState!.validate()) return;
-
     setState(() => _paying = true);
-    // Simulamos el tiempo que tarda la pasarela de pago en responder.
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    if (!mounted) return;
-
-    final digits = _number.text.replaceAll(' ', '');
-    if (_method == _Method.card && digits == declinedTestCard) {
-      setState(() => _paying = false);
-      await showInfoDialog(
-        context,
-        title: 'Pago rechazado',
-        message:
-            'Tu banco rechazó el cargo, así que la cita NO se agendó. '
-            'Intenta con otra tarjeta.',
-        icon: Icons.error_outline,
-        color: AppColors.red,
-      );
-      return;
-    }
-
-    final session = AppScope.read(context);
     try {
-      final a = await Database.instance.book(
-        business: widget.business,
-        service: widget.service,
+      final start = await Payments.startBooking(
+        businessId: widget.business.id,
+        itemId: widget.service.id,
         start: widget.start,
-        clientUid: session.user?.uid,
-        clientName: session.displayName,
-        clientEmail: session.email,
-        preferredProfessional: widget.preferred,
+        professional: widget.preferred,
         note: widget.note,
       );
-      // Aviso por correo al negocio (si falla, la cita ya quedó guardada).
-      final sent = await EmailService.notifyNewBooking(a);
       if (!mounted) return;
-      setState(() => _paying = false);
-      await showInfoDialog(
-        context,
-        title: '¡Cita confirmada!',
-        message: '${a.serviceName} en ${a.businessName}\n'
-            '${shortDate(a.start)} · ${hhmm(a.start)} con ${a.professional}\n\n'
-            'Anticipo pagado: ${money2(a.depositPaid)}\n'
-            'Pagarás ${money2(a.remaining)} en el negocio.'
-            '${sent ? '\n\nLe avisamos al negocio por correo.' : ''}',
-        icon: Icons.check_circle,
-        color: AppColors.green,
+
+      if (start.demo) {
+        await _demoConfirmed(start.id);
+        return;
+      }
+      final url = start.checkoutUrl;
+      if (url == null) throw PaymentException('No se pudo abrir la página de pago.');
+      await Payments.openStripePage(url);
+      if (!mounted) return;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => CheckoutWaitScreen(id: start.id, isOrder: false, checkoutUrl: url),
+        ),
       );
+    } on PaymentException catch (e) {
       if (!mounted) return;
-      // Regresamos al inicio y abrimos la pestaña "Mis citas".
-      session.clientTab = 2;
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    } on BookingException catch (e) {
-      if (!mounted) return;
-      setState(() => _paying = false);
       await showInfoDialog(
         context,
-        title: 'Horario no disponible',
+        title: 'No se pudo reservar',
         message: e.message,
         icon: Icons.event_busy,
         color: AppColors.amber,
       );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _paying = false);
-      showMessage(context, 'No se pudo guardar la cita: $e');
+    } finally {
+      if (mounted) setState(() => _paying = false);
     }
+  }
+
+  /// Los negocios de ejemplo no cobran: el servidor confirma directo.
+  Future<void> _demoConfirmed(String appointmentId) async {
+    final a = await Database.instance.appointmentStream(appointmentId).first;
+    if (a != null) await EmailService.notifyNewBooking(a);
+    if (!mounted) return;
+    await showInfoDialog(
+      context,
+      title: '¡Cita confirmada!',
+      message: '${widget.service.name} en ${widget.business.name}\n'
+          '${shortDate(widget.start)} · ${hhmm(widget.start)}'
+          '${a != null ? ' con ${a.professional}' : ''}\n\n'
+          'Este es un negocio de ejemplo, así que no se cobró anticipo.',
+      icon: Icons.check_circle,
+      color: AppColors.green,
+    );
+    if (!mounted) return;
+    AppScope.read(context).clientTab = 2;
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Widget _row(String label, String value, {bool strong = false}) {
@@ -173,173 +131,97 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  Widget _methodTile(_Method method, IconData icon, String title) {
-    final selected = _method == method;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: AppCard(
-        onTap: () => setState(() => _method = method),
-        borderColor: selected ? AppColors.teal : Colors.transparent,
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Icon(
-              selected ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: selected ? AppColors.teal : AppColors.gray,
-            ),
-            const SizedBox(width: 10),
-            Icon(icon, color: AppColors.blue),
-            const SizedBox(width: 10),
-            Expanded(child: Text(title)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _cardForm() {
-    return Form(
-      key: _formKey,
-      child: Column(
-        children: [
-          TextFormField(
-            controller: _number,
-            keyboardType: TextInputType.number,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9 ]')),
-              LengthLimitingTextInputFormatter(19),
-            ],
-            decoration: fieldDecoration('Número de tarjeta',
-                icon: Icons.credit_card),
-            validator: _validateNumber,
-          ),
-          const SizedBox(height: 10),
-          TextFormField(
-            controller: _holder,
-            textCapitalization: TextCapitalization.words,
-            decoration: fieldDecoration('Nombre como aparece en la tarjeta'),
-            validator: (v) =>
-                (v ?? '').trim().isEmpty ? 'Escribe el nombre' : null,
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: TextFormField(
-                  controller: _expiry,
-                  keyboardType: TextInputType.datetime,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
-                    LengthLimitingTextInputFormatter(5),
-                  ],
-                  decoration: fieldDecoration('MM/AA'),
-                  validator: _validateExpiry,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextFormField(
-                  controller: _cvv,
-                  keyboardType: TextInputType.number,
-                  obscureText: true,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(4),
-                  ],
-                  decoration: fieldDecoration('CVV'),
-                  validator: (v) => RegExp(r'^\d{3,4}$').hasMatch(v ?? '')
-                      ? null
-                      : 'CVV inválido',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          const AppCard(
-            color: Color(0xFFE6F0F2),
-            child: Text(
-              'Modo de prueba: usa 4242 4242 4242 4242 para un pago aprobado '
-              'o 4000 0000 0000 0002 para un pago rechazado. '
-              'Cualquier fecha futura y cualquier CVV.',
-              style: TextStyle(fontSize: 12, color: AppColors.deep),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final s = widget.service;
     final deposit = s.deposit;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Pago del anticipo')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
-        children: [
-          AppCard(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Resumen de la reserva',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                const SizedBox(height: 4),
-                _row(s.name, money2(s.price)),
-                _row('Negocio', widget.business.name),
-                _row('Fecha',
-                    '${shortDate(widget.start)} · ${hhmm(widget.start)}'),
-                _row('Profesional', widget.preferred ?? 'Cualquiera'),
-                const Divider(height: 24),
-                _row('Anticipo (25 %)', money2(deposit), strong: true),
-                _row('Restante a pagar en el negocio',
-                    money2(s.price - deposit)),
+    return StreamBuilder<PayoutStatus>(
+      stream: _payout,
+      builder: (context, snap) {
+        final canCharge = _isDemo || (snap.data?.chargesEnabled ?? false);
+        final loadingStatus = !_isDemo && !snap.hasData && !snap.hasError;
+
+        return Scaffold(
+          appBar: AppBar(title: const Text('Pago del anticipo')),
+          body: ListView(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
+            children: [
+              AppCard(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Resumen de la reserva',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    const SizedBox(height: 4),
+                    _row(s.name, money2(s.price)),
+                    _row('Negocio', widget.business.name),
+                    _row('Fecha', '${shortDate(widget.start)} · ${hhmm(widget.start)}'),
+                    _row('Te atiende', widget.preferred ?? 'Cualquiera'),
+                    const Divider(height: 24),
+                    _row('Anticipo (25 %)', _isDemo ? money2(0) : money2(deposit), strong: true),
+                    _row('Restante a pagar en el negocio',
+                        money2(s.price - (_isDemo ? 0 : deposit))),
+                  ],
+                ),
+              ),
+              const SectionLabel('Cómo se paga'),
+              AppCard(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    const Icon(Icons.lock_outline, color: AppColors.green),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _isDemo
+                            ? 'Este es un negocio de ejemplo: la cita se confirma sin cobrar.'
+                            : 'Se abrirá la página segura de Stripe. Ahí eliges una tarjeta '
+                                'guardada o escribes una nueva. Bookly nunca ve los datos '
+                                'de tu tarjeta.',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!canCharge && !loadingStatus) ...[
+                const SizedBox(height: 10),
+                const AppCard(
+                  color: AppColors.redSoft,
+                  child: Text(
+                    'Este negocio todavía no activa sus cobros en línea, así que '
+                    'por ahora no se puede reservar con anticipo. Intenta más tarde.',
+                    style: TextStyle(fontSize: 12, color: AppColors.red),
+                  ),
+                ),
               ],
-            ),
+              const SizedBox(height: 12),
+              const AppCard(
+                color: AppColors.amberSoft,
+                child: Text(
+                  'Política de cancelación: puedes cancelar sin costo hasta 24 h '
+                  'antes y se te devuelve el anticipo. Después de ese plazo el '
+                  'anticipo no es reembolsable.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8A5A0C)),
+                ),
+              ),
+            ],
           ),
-          const SectionLabel('Método de pago'),
-          _methodTile(_Method.card, Icons.credit_card,
-              'Tarjeta de crédito o débito'),
-          _methodTile(_Method.mercadoPago, Icons.account_balance_wallet_outlined,
-              'Mercado Pago'),
-          const SizedBox(height: 4),
-          if (_method == _Method.card)
-            _cardForm()
-          else
-            const AppCard(
-              color: Color(0xFFE6F0F2),
-              child: Text(
-                'Se abrirá Mercado Pago para autorizar el cargo. '
-                '(En esta versión el pago se simula y siempre se aprueba.)',
-                style: TextStyle(fontSize: 12, color: AppColors.deep),
+          bottomNavigationBar: SafeArea(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
+              color: Colors.white,
+              child: PrimaryButton(
+                label: _isDemo ? 'Confirmar cita' : 'Pagar ${money2(deposit)} con Stripe',
+                loading: _paying || loadingStatus,
+                onPressed: canCharge ? _pay : null,
               ),
             ),
-          const SizedBox(height: 12),
-          const AppCard(
-            color: AppColors.amberSoft,
-            child: Text(
-              'Política de cancelación: puedes cancelar sin costo hasta 24 h '
-              'antes. Después de ese plazo el anticipo no es reembolsable.',
-              style: TextStyle(fontSize: 12, color: Color(0xFF8A5A0C)),
-            ),
           ),
-        ],
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
-          color: Colors.white,
-          child: PrimaryButton(
-            label: 'Pagar ${money2(deposit)} y confirmar',
-            loading: _paying,
-            onPressed: _pay,
-          ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

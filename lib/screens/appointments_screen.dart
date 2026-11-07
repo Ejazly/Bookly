@@ -4,6 +4,7 @@ import '../logic/schedule.dart';
 import '../models/models.dart';
 import '../services/database.dart';
 import '../services/email_service.dart';
+import '../services/payments_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../utils/format.dart';
@@ -154,18 +155,32 @@ class _AppointmentCardState extends State<_AppointmentCard> {
     if (!ok) return;
     setState(() => _busy = true);
     try {
-      await Database.instance.cancel(a);
+      // El servidor revisa la política de 24 h y hace el reembolso en Stripe.
+      final refunded = await Payments.cancelAppointment(a.id);
       await EmailService.notifyCancelledByClient(a);
       if (mounted) {
         showMessage(
           context,
-          refundable && a.depositPaid > 0
-              ? 'Cita cancelada. Tu anticipo será reembolsado.'
+          refunded > 0
+              ? 'Cita cancelada. Se te devolvieron ${money2(refunded)} a tu tarjeta.'
               : 'Cita cancelada.',
         );
       }
-    } catch (e) {
-      if (mounted) showMessage(context, 'No se pudo cancelar: $e');
+    } on PaymentException catch (e) {
+      if (mounted) showMessage(context, e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Cita apartada que todavía no se paga: se libera el horario.
+  Future<void> _cancelPending() async {
+    setState(() => _busy = true);
+    try {
+      await Payments.cancelPending(isOrder: false, id: widget.appointment.id);
+      if (mounted) showMessage(context, 'Se liberó el horario. No se hizo ningún cargo.');
+    } on PaymentException catch (e) {
+      if (mounted) showMessage(context, e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -206,8 +221,11 @@ class _AppointmentCardState extends State<_AppointmentCard> {
 
     final StatusBadge badge;
     if (a.isCancelled) {
-      badge = const StatusBadge('Cancelada',
+      badge = StatusBadge(a.status.label,
           color: AppColors.red, background: AppColors.redSoft);
+    } else if (a.isPending) {
+      badge = const StatusBadge('Esperando pago',
+          color: Color(0xFFB57511), background: AppColors.amberSoft);
     } else if (widget.upcoming) {
       badge = const StatusBadge('Confirmada');
     } else {
@@ -249,7 +267,11 @@ class _AppointmentCardState extends State<_AppointmentCard> {
               Text(
                 a.createdByBusiness
                     ? 'Agendada por el negocio'
-                    : 'Anticipo pagado ${money2(a.depositPaid)}',
+                    : a.isPending
+                        ? 'Anticipo sin pagar'
+                        : a.refundedCents > 0
+                            ? 'Reembolsado ${money2(fromCents(a.refundedCents))}'
+                            : 'Anticipo pagado ${money2(a.depositPaid)}',
                 style: const TextStyle(color: AppColors.muted, fontSize: 12),
               ),
               Text('Resta ${money2(a.remaining)}',
@@ -260,7 +282,20 @@ class _AppointmentCardState extends State<_AppointmentCard> {
             const SizedBox(height: 6),
             Text('Nota: ${a.note}', style: const TextStyle(fontSize: 12)),
           ],
-          if (widget.upcoming) ...[
+          if (widget.upcoming && a.isPending) ...[
+            const SizedBox(height: 12),
+            if (_busy)
+              const LinearProgressIndicator()
+            else
+              OutlinedButton(
+                onPressed: _cancelPending,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.red,
+                  side: const BorderSide(color: Color(0xFFE8B4B4)),
+                ),
+                child: const Text('Cancelar apartado'),
+              ),
+          ] else if (widget.upcoming) ...[
             const SizedBox(height: 12),
             if (_busy)
               const LinearProgressIndicator()

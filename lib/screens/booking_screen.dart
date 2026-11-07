@@ -4,6 +4,7 @@ import '../logic/schedule.dart';
 import '../models/models.dart';
 import '../services/database.dart';
 import '../services/email_service.dart';
+import '../services/payments_service.dart';
 import '../theme/app_colors.dart';
 import '../utils/format.dart';
 import '../widgets/common.dart';
@@ -13,8 +14,10 @@ import 'payment_screen.dart';
 /// Agendar cita (cliente). También se usa para reprogramar una cita
 /// existente cuando [rescheduling] no es null.
 ///
-/// Los horarios ocupados se leen de Firestore en tiempo real: si otra
-/// persona agenda mientras tienes la pantalla abierta, el horario se tacha.
+/// Los horarios ocupados se leen en tiempo real de `businesses/{id}/busy`
+/// (sin datos de otros clientes): si otra persona agenda mientras tienes la
+/// pantalla abierta, el horario se tacha. El servidor lo vuelve a revisar
+/// al apartar o reprogramar.
 class BookingScreen extends StatefulWidget {
   const BookingScreen({
     super.key,
@@ -38,7 +41,7 @@ class _BookingScreenState extends State<BookingScreen> {
   late final List<DateTime> _days = nextDays(DateTime.now(), _daysToShow);
   late DateTime _day = _initialDay();
   late Stream<List<Appointment>> _stream =
-      Database.instance.appointmentsForDay(widget.business.id, _day);
+      Database.instance.busyForDay(widget.business.id, _day);
   DateTime? _time;
   String? _pro; // quién atiende en el horario elegido
   bool _saving = false;
@@ -68,7 +71,7 @@ class _BookingScreenState extends State<BookingScreen> {
       _day = d;
       _time = null;
       _pro = null;
-      _stream = Database.instance.appointmentsForDay(widget.business.id, d);
+      _stream = Database.instance.busyForDay(widget.business.id, d);
     });
   }
 
@@ -94,20 +97,17 @@ class _BookingScreenState extends State<BookingScreen> {
 
     setState(() => _saving = true);
     try {
-      final updated = await Database.instance.reschedule(
-        appointment: r,
-        business: widget.business,
-        newStart: t,
-        preferredProfessional: _pro,
+      final pro = await Payments.reschedule(
+        appointmentId: r.id,
+        start: t,
+        professional: _pro,
       );
-      await EmailService.notifyRescheduled(r, updated);
+      await EmailService.notifyRescheduled(r, r.copyWith(start: t, professional: pro));
       if (!mounted) return;
-      showMessage(context, 'Cita reprogramada para el ${shortDate(t)} a las ${hhmm(t)}.');
+      showMessage(context, 'Cita reprogramada para el ${shortDate(t)} a las ${hhmm(t)} con $pro.');
       Navigator.of(context).pop();
-    } on BookingException catch (e) {
+    } on PaymentException catch (e) {
       if (mounted) showMessage(context, e.message);
-    } catch (e) {
-      if (mounted) showMessage(context, 'No se pudo reprogramar: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

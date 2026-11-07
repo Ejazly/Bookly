@@ -94,8 +94,9 @@ Las reglas hacen que:
 
 - cada persona solo pueda leer y editar su propio perfil;
 - solo el dueño de un negocio pueda cambiar sus datos, el diseño de su sitio, su galería de fotos, su inventario y sus publicaciones;
-- cualquier usuario con sesión pueda crear una cita y ver qué horarios están ocupados;
-- solo el cliente de una cita, o el negocio, puedan cancelarla o cambiarla.
+- cualquier usuario con sesión pueda ver qué horarios están ocupados (sin ver quién reservó);
+- solo el cliente de una cita, o el negocio, puedan verla;
+- **crear, cancelar o cambiar citas, pedidos y pagos lo haga solo el servidor** (ver [PAGOS_STRIPE.md](PAGOS_STRIPE.md)). Desde la versión con pagos, las reglas se publican con `firebase deploy --only firestore:rules`.
 
 ---
 

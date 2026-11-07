@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common.dart';
+import 'wallet_screen.dart';
 
 /// Pestaña Perfil del cliente. Desde aquí se cambia a la interfaz de negocio.
 class ProfileScreen extends StatelessWidget {
@@ -73,6 +74,15 @@ class ProfileScreen extends StatelessWidget {
                   leading: const Icon(Icons.mail_outline),
                   title: const Text('Avisos de citas'),
                   subtitle: Text('Se envían a ${session.email}'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.account_balance_wallet_outlined),
+                  title: const Text('Billetera'),
+                  subtitle: const Text('Formas de pago, pagos y compras'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const WalletScreen()),
+                  ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.event_note_outlined),

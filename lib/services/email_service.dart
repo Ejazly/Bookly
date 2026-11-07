@@ -123,7 +123,21 @@ class EmailService {
       subject: 'Tu cita en ${a.businessName} fue cancelada',
       message: '${a.businessName} canceló tu cita de ${a.serviceName} '
           'del ${_when(a)}.\n'
-          'Si pagaste un anticipo, comunícate con el negocio para el reembolso.',
+          '${a.depositPaid > 0 && !a.createdByBusiness ? 'Tu anticipo de ${money2(a.depositPaid)} se te devolvió a tu tarjeta (puede tardar de 5 a 10 días en verse).' : 'Si quieres otra fecha, puedes agendar de nuevo en Bookly.'}',
+    );
+  }
+
+  /// Aviso al negocio: alguien compró un producto (ya pagado).
+  static Future<bool> notifyNewOrder(ShopOrder o) {
+    return send(
+      toEmail: o.ownerEmail,
+      toName: o.businessName,
+      subject: 'Nueva venta: ${o.quantity} × ${o.itemName}',
+      message: '${o.buyerName} compró ${o.quantity} × ${o.itemName} en ${o.businessName}.\n\n'
+          'Total pagado en línea: ${money2(fromCents(o.totalCents))}\n'
+          'Correo del cliente: ${o.buyerEmail}\n'
+          'Pasará a recoger su pedido al negocio. '
+          'Lo verás también en Cuenta → Cobros y ventas.',
     );
   }
 }

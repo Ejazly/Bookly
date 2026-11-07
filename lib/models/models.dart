@@ -515,7 +515,33 @@ class Post {
 // Citas
 // -----------------------------------------------------------------------------
 
-enum AppointmentStatus { confirmada, cancelada }
+/// Estados de una cita. [wire] es el texto que guarda el servidor.
+enum AppointmentStatus {
+  confirmada('confirmada'),
+  cancelada('cancelada'),
+  pendientePago('pendiente_pago'),
+  expirada('expirada'),
+  reembolsada('reembolsada');
+
+  const AppointmentStatus(this.wire);
+
+  final String wire;
+
+  static AppointmentStatus parse(Object? value) {
+    for (final s in values) {
+      if (s.wire == value) return s;
+    }
+    return AppointmentStatus.confirmada;
+  }
+
+  String get label => switch (this) {
+        AppointmentStatus.confirmada => 'Confirmada',
+        AppointmentStatus.cancelada => 'Cancelada',
+        AppointmentStatus.pendientePago => 'Esperando pago',
+        AppointmentStatus.expirada => 'Pago no completado',
+        AppointmentStatus.reembolsada => 'Reembolsada',
+      };
+}
 
 /// Cita agendada: `appointments/{id}`.
 class Appointment {
@@ -538,6 +564,9 @@ class Appointment {
     this.note = '',
     this.status = AppointmentStatus.confirmada,
     this.createdByBusiness = false,
+    this.holdExpiresAt,
+    this.refundedCents = 0,
+    this.cancelledBy = '',
   });
 
   final String id;
@@ -559,9 +588,35 @@ class Appointment {
   final AppointmentStatus status;
   final bool createdByBusiness;
 
+  /// Hasta cuándo se aparta el horario mientras el cliente paga.
+  final DateTime? holdExpiresAt;
+
+  /// Centavos devueltos al cancelar (lo escribe el servidor).
+  final int refundedCents;
+
+  /// 'cliente' o 'negocio'.
+  final String cancelledBy;
+
   DateTime get end => start.add(Duration(minutes: minutes));
   double get remaining => price - depositPaid;
-  bool get isCancelled => status == AppointmentStatus.cancelada;
+
+  /// Ya no está activa: cancelada, reembolsada o el pago no se completó.
+  bool get isCancelled =>
+      status == AppointmentStatus.cancelada ||
+      status == AppointmentStatus.expirada ||
+      status == AppointmentStatus.reembolsada;
+
+  bool get isPending => status == AppointmentStatus.pendientePago;
+
+  /// ¿Ocupa el horario? Confirmada, o apartada mientras el cliente paga.
+  bool blocksSlot(DateTime now) {
+    if (status == AppointmentStatus.confirmada) return true;
+    if (status == AppointmentStatus.pendientePago) {
+      final until = holdExpiresAt;
+      return until != null && until.isAfter(now);
+    }
+    return false;
+  }
 
   factory Appointment.fromMap(String id, Map<String, dynamic> m) {
     return Appointment(
@@ -581,10 +636,11 @@ class Appointment {
       clientEmail: _string(m['clientEmail']),
       clientPhone: _string(m['clientPhone']),
       note: _string(m['note']),
-      status: m['status'] == AppointmentStatus.cancelada.name
-          ? AppointmentStatus.cancelada
-          : AppointmentStatus.confirmada,
+      status: AppointmentStatus.parse(m['status']),
       createdByBusiness: _bool(m['createdByBusiness']),
+      holdExpiresAt: readDate(m['holdExpiresAt']),
+      refundedCents: _int(m['refundedCents'], 0),
+      cancelledBy: _string(m['cancelledBy']),
     );
   }
 
@@ -606,7 +662,7 @@ class Appointment {
         'clientEmail': clientEmail.toLowerCase(),
         'clientPhone': clientPhone,
         'note': note,
-        'status': status.name,
+        'status': status.wire,
         'createdByBusiness': createdByBusiness,
       };
 
@@ -635,6 +691,9 @@ class Appointment {
       note: note,
       status: status ?? this.status,
       createdByBusiness: createdByBusiness,
+      holdExpiresAt: holdExpiresAt,
+      refundedCents: refundedCents,
+      cancelledBy: cancelledBy,
     );
   }
 }
@@ -642,3 +701,165 @@ class Appointment {
 /// Clave de día: 2026-11-05.
 String dayKey(DateTime d) =>
     '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+// -----------------------------------------------------------------------------
+// Pagos (todo esto lo escribe SOLO el servidor; la app solo lo lee)
+// -----------------------------------------------------------------------------
+
+/// Pesos a partir de centavos: 5750 → 57.50.
+double fromCents(Object? cents) => (cents is num ? cents : 0) / 100;
+
+/// Estado público de cobros de un negocio: `paymentStatus/{businessId}`.
+class PayoutStatus {
+  const PayoutStatus({
+    this.connected = false,
+    this.chargesEnabled = false,
+    this.payoutsEnabled = false,
+    this.detailsSubmitted = false,
+  });
+
+  final bool connected;
+  final bool chargesEnabled;
+  final bool payoutsEnabled;
+  final bool detailsSubmitted;
+
+  factory PayoutStatus.fromMap(Map<String, dynamic>? m) => PayoutStatus(
+        connected: _bool(m?['connected']),
+        chargesEnabled: _bool(m?['chargesEnabled']),
+        payoutsEnabled: _bool(m?['payoutsEnabled']),
+        detailsSubmitted: _bool(m?['detailsSubmitted']),
+      );
+}
+
+/// Tarjeta guardada en Stripe (solo marca, últimos 4 dígitos y vencimiento).
+class SavedCard {
+  const SavedCard({
+    required this.id,
+    required this.brand,
+    required this.last4,
+    required this.expMonth,
+    required this.expYear,
+  });
+
+  final String id;
+  final String brand;
+  final String last4;
+  final int expMonth;
+  final int expYear;
+
+  String get brandLabel => switch (brand) {
+        'visa' => 'Visa',
+        'mastercard' => 'Mastercard',
+        'amex' => 'American Express',
+        _ => brand.isEmpty ? 'Tarjeta' : brand[0].toUpperCase() + brand.substring(1),
+      };
+
+  String get expiryText =>
+      '${expMonth.toString().padLeft(2, '0')}/${(expYear % 100).toString().padLeft(2, '0')}';
+
+  factory SavedCard.fromMap(Map<String, dynamic> m) => SavedCard(
+        id: _string(m['id']),
+        brand: _string(m['brand']),
+        last4: _string(m['last4']),
+        expMonth: _int(m['expMonth']),
+        expYear: _int(m['expYear']),
+      );
+}
+
+/// Movimiento de dinero: `users/{uid}/movements` o `businesses/{id}/movements`.
+///
+/// Para el cliente se usa [amountCents]; para el negocio [grossCents]
+/// (lo que pagó el cliente), [feeCents] (comisión de Bookly) y [netCents]
+/// (lo que le llega al negocio).
+class Movement {
+  const Movement({
+    required this.id,
+    required this.type,
+    required this.concept,
+    this.businessName = '',
+    this.amountCents = 0,
+    this.grossCents = 0,
+    this.feeCents = 0,
+    this.netCents = 0,
+    this.createdAt,
+  });
+
+  final String id;
+  final String type; // anticipo, compra, venta, reembolso, anticipo_en_local
+  final String concept;
+  final String businessName;
+  final int amountCents;
+  final int grossCents;
+  final int feeCents;
+  final int netCents;
+  final DateTime? createdAt;
+
+  bool get isRefund => type == 'reembolso';
+
+  factory Movement.fromMap(String id, Map<String, dynamic> m) => Movement(
+        id: id,
+        type: _string(m['type']),
+        concept: _string(m['concept']),
+        businessName: _string(m['businessName']),
+        amountCents: _int(m['amountCents']),
+        grossCents: _int(m['grossCents']),
+        feeCents: _int(m['feeCents']),
+        netCents: _int(m['netCents']),
+        createdAt: readDate(m['createdAt']),
+      );
+}
+
+/// Compra de un producto: `orders/{id}`.
+class ShopOrder {
+  const ShopOrder({
+    required this.id,
+    required this.businessId,
+    required this.businessName,
+    required this.ownerEmail,
+    required this.itemName,
+    required this.unitPrice,
+    required this.quantity,
+    required this.totalCents,
+    required this.buyerName,
+    required this.buyerEmail,
+    required this.status,
+    this.createdAt,
+  });
+
+  final String id;
+  final String businessId;
+  final String businessName;
+  final String ownerEmail;
+  final String itemName;
+  final double unitPrice;
+  final int quantity;
+  final int totalCents;
+  final String buyerName;
+  final String buyerEmail;
+  final String status; // pendiente_pago, pagada, expirada, reembolsada
+  final DateTime? createdAt;
+
+  bool get isPaid => status == 'pagada';
+
+  String get statusLabel => switch (status) {
+        'pagada' => 'Pagada',
+        'pendiente_pago' => 'Esperando pago',
+        'reembolsada' => 'Reembolsada',
+        _ => 'Pago no completado',
+      };
+
+  factory ShopOrder.fromMap(String id, Map<String, dynamic> m) => ShopOrder(
+        id: id,
+        businessId: _string(m['businessId']),
+        businessName: _string(m['businessName']),
+        ownerEmail: _string(m['ownerEmail']),
+        itemName: _string(m['itemName']),
+        unitPrice: _double(m['unitPrice']),
+        quantity: _int(m['quantity'], 1),
+        totalCents: _int(m['totalCents']),
+        buyerName: _string(m['buyerName']),
+        buyerEmail: _string(m['buyerEmail']),
+        status: _string(m['status']),
+        createdAt: readDate(m['createdAt']),
+      );
+}

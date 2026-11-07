@@ -9,6 +9,7 @@ import '../widgets/images.dart';
 import '../widgets/post_card.dart';
 import '../widgets/site_widgets.dart';
 import 'booking_screen.dart';
+import 'order_screen.dart';
 
 /// Abre el sitio de un negocio.
 void openBusiness(BuildContext context, Business business) {
@@ -46,6 +47,16 @@ class _BusinessScreenState extends State<BusinessScreen> {
     }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => BookingScreen(business: b, service: service)),
+    );
+  }
+
+  void _buy(Business b, Item product) {
+    if (widget.preview) {
+      showMessage(context, 'Vista previa: así verán tus clientes el botón Comprar.');
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => OrderScreen(business: b, product: product)),
     );
   }
 
@@ -114,6 +125,8 @@ class _BusinessScreenState extends State<BusinessScreen> {
                   item: item,
                   accent: b.accent,
                   onBook: services ? () => _book(b, item) : null,
+                  // Los negocios de ejemplo no venden en línea.
+                  onBuy: !services && !b.demo && item.stock > 0 ? () => _buy(b, item) : null,
                 ),
               ),
           ],
@@ -282,11 +295,12 @@ class _BusinessScreenState extends State<BusinessScreen> {
 }
 
 class _ItemCard extends StatelessWidget {
-  const _ItemCard({required this.item, required this.accent, this.onBook});
+  const _ItemCard({required this.item, required this.accent, this.onBook, this.onBuy});
 
   final Item item;
   final Color accent;
   final VoidCallback? onBook; // null = producto (no se agenda)
+  final VoidCallback? onBuy; // null = no se vende en línea
 
   @override
   Widget build(BuildContext context) {
@@ -347,6 +361,17 @@ class _ItemCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(10)),
                         ),
                         child: const Text('Reservar'),
+                      ),
+                    if (onBuy != null)
+                      FilledButton(
+                        onPressed: onBuy,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.green,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Comprar'),
                       ),
                   ],
                 ),
