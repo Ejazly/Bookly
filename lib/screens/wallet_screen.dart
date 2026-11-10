@@ -124,7 +124,7 @@ class _WalletScreenState extends State<WalletScreen> with WidgetsBindingObserver
               for (final c in cards)
                 ListTile(
                   leading: const CircleAvatar(
-                    backgroundColor: Color(0x221C6470),
+                    backgroundColor: AppColors.mist,
                     child: Icon(Icons.credit_card, color: AppColors.teal),
                   ),
                   title: Text('${c.brandLabel} •••• ${c.last4}'),
@@ -243,7 +243,7 @@ class _WalletScreenState extends State<WalletScreen> with WidgetsBindingObserver
         padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
         children: [
           const AppCard(
-            color: Color(0xFFE6F0F2),
+            color: AppColors.mist,
             child: Row(
               children: [
                 Icon(Icons.shield_outlined, color: AppColors.teal),

@@ -214,7 +214,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addPerson,
-        backgroundColor: AppColors.green,
+        backgroundColor: AppColors.action,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.person_add_alt_1),
         label: const Text('Agregar persona'),
@@ -346,7 +346,7 @@ class _AgendaTile extends StatelessWidget {
 
     final StatusBadge origin = a.createdByBusiness
         ? const StatusBadge('Agregada por ti',
-            color: AppColors.blue, background: Color(0xFFE3ECF7))
+            color: AppColors.blue, background: AppColors.mist)
         : const StatusBadge('Reservó en la app');
     final StatusBadge deposit = a.isPending
         ? const StatusBadge('Pagando anticipo…',

@@ -63,7 +63,7 @@ class BusinessSiteHeader extends StatelessWidget {
                   ],
                   const SizedBox(height: 6),
                   Text(
-                    '${b.categoryLabel} · ${b.address}',
+                    b.categoryLabel,
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: AppColors.muted, fontSize: 12),
                   ),

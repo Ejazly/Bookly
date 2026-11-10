@@ -1,6 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
+import 'ads/ads.dart';
 import 'firebase_options.dart';
 import 'models/models.dart';
 import 'screens/business_panel_screen.dart';
@@ -8,6 +9,8 @@ import 'screens/business_setup_screen.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
+import 'screens/verify_email_screen.dart';
+import 'services/auth_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
@@ -32,6 +35,7 @@ Future<void> main() async {
   }
 
   await Firebase.initializeApp(options: options);
+  await AdsService.init(); // anuncios (solo Android/iPhone)
   runApp(BooklyApp(session: AppSession()));
 }
 
@@ -55,7 +59,8 @@ class BooklyApp extends StatelessWidget {
 }
 
 /// Decide qué pantalla mostrar según la sesión:
-///   sin sesión            → Inicio de sesión con Google
+///   sin sesión            → Inicio de sesión (Google o correo y contraseña)
+///   correo sin verificar  → "Revisa tu correo"
 ///   cuenta nueva          → "¿Cómo usarás Bookly?" (elegir perfil)
 ///   interfaz de negocio   → configurar negocio o panel del negocio
 ///   interfaz de cliente   → inicio del cliente
@@ -67,7 +72,10 @@ class AuthGate extends StatelessWidget {
     final s = AppScope.of(context);
 
     if (!s.authLoaded) return const _Splash();
-    if (s.user == null) return const LoginScreen();
+    final user = s.user;
+    if (user == null) return const LoginScreen();
+    // Cuentas con contraseña: primero hay que confirmar el correo.
+    if (AuthService.needsVerification(user)) return const VerifyEmailScreen();
     if (!s.profileLoaded) return const _Splash();
 
     final profile = s.profile;

@@ -4,10 +4,12 @@ import '../models/models.dart';
 import '../services/database.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
+import '../ads/ads.dart';
 import '../widgets/common.dart';
+import '../widgets/nearby_section.dart';
 import 'business_screen.dart';
 
-/// Inicio del cliente: buscar y explorar negocios.
+/// Inicio del cliente: negocios cerca de ti (con mapa), buscar y explorar.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -78,26 +80,23 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Negocios',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 10),
           StreamBuilder<List<Business>>(
             stream: _stream,
             builder: (context, snapshot) {
               final status = streamStatus(snapshot);
               if (status != null) return status;
-              final list = snapshot.data!.where((b) {
-                final matchesCategory = _category == null || b.category == _category;
-                final matchesText = q.isEmpty ||
+              final byCategory = snapshot.data!
+                  .where((b) => _category == null || b.category == _category)
+                  .toList();
+              final list = byCategory.where((b) {
+                return q.isEmpty ||
                     b.name.toLowerCase().contains(q) ||
                     b.address.toLowerCase().contains(q);
-                return matchesCategory && matchesText;
               }).toList();
 
+              final Widget results;
               if (list.isEmpty) {
-                return const Padding(
+                results = const Padding(
                   padding: EdgeInsets.all(24),
                   child: Text(
                     'No encontramos negocios con esa búsqueda.',
@@ -105,18 +104,41 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(color: AppColors.muted),
                   ),
                 );
-              }
-              return Column(
-                children: [
-                  for (final b in list)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: BusinessCard(
-                        business: b,
-                        now: now,
-                        onTap: () => openBusiness(context, b),
+              } else {
+                results = Column(
+                  children: [
+                    for (final b in list)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: BusinessCard(
+                          business: b,
+                          now: now,
+                          onTap: () => openBusiness(context, b),
+                        ),
                       ),
+                  ],
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Mientras busca algo, se oculta el mapa para enfocarse en los resultados.
+                  if (q.isEmpty) ...[
+                    NearbySection(
+                      businesses: byCategory,
+                      onOpen: (b) => openBusiness(context, b),
                     ),
+                    const SizedBox(height: 18),
+                    const AdBanner(),
+                    const SizedBox(height: 18),
+                  ],
+                  Text(
+                    q.isEmpty ? 'Todos los negocios' : 'Resultados',
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 10),
+                  results,
                 ],
               );
             },

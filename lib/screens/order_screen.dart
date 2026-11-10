@@ -159,10 +159,11 @@ class _OrderScreenState extends State<OrderScreen> {
               if (!canCharge && !loading) ...[
                 const SizedBox(height: 10),
                 const AppCard(
-                  color: AppColors.redSoft,
+                  color: AppColors.amberSoft,
                   child: Text(
-                    'Este negocio todavía no activa sus cobros en línea.',
-                    style: TextStyle(fontSize: 12, color: AppColors.red),
+                    'Este negocio todavía no conecta su cuenta de cobros. En modo de '
+                    'prueba el pago se hace igual (lo recibe Bookly) para que puedas probar.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF8A5A0C)),
                   ),
                 ),
               ],
@@ -175,7 +176,7 @@ class _OrderScreenState extends State<OrderScreen> {
               child: PrimaryButton(
                 label: 'Pagar ${money2(total)} con Stripe',
                 loading: _paying || loading,
-                onPressed: canCharge ? _pay : null,
+                onPressed: _pay, // el servidor decide si se puede cobrar
               ),
             ),
           ),

@@ -203,7 +203,7 @@ class _BookingScreenState extends State<BookingScreen> {
           padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
           decoration: const BoxDecoration(
             color: Colors.white,
-            border: Border(top: BorderSide(color: Color(0xFFE1E6E8))),
+            border: Border(top: BorderSide(color: AppColors.line)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,

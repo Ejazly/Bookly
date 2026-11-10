@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter, instantiateImageCodec;
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -73,7 +74,7 @@ class Base64Image extends StatelessWidget {
     final bytes = value == null ? null : _decode(value);
     final Widget child = bytes == null
         ? Container(
-            color: const Color(0xFFE3E8EA),
+            color: AppColors.mist,
             alignment: Alignment.center,
             child: Icon(placeholderIcon, color: AppColors.muted),
           )
@@ -81,6 +82,78 @@ class Base64Image extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(width: width, height: height, child: child),
+    );
+  }
+}
+
+/// Proporción (alto / ancho) de cada imagen ya medida.
+final Map<String, double> _ratioCache = {};
+
+Future<double> _ratioOf(String data, Uint8List bytes) async {
+  final cached = _ratioCache[data];
+  if (cached != null) return cached;
+  final codec = await instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  final img = frame.image;
+  final ratio = img.width == 0 ? 1.0 : img.height / img.width;
+  img.dispose();
+  if (_ratioCache.length > 200) _ratioCache.clear();
+  _ratioCache[data] = ratio;
+  return ratio;
+}
+
+/// Imagen de publicación como en Instagram o Facebook: ocupa todo el ancho
+/// y su alto sale de la forma de la foto. Solo las fotos MUY altas o MUY
+/// anchas se ajustan a 4:5 o 1.91:1 (igual que Instagram), sin franjas.
+class AdaptiveImage extends StatelessWidget {
+  const AdaptiveImage({super.key, required this.data});
+
+  final String data;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _decode(data);
+    if (bytes == null) return const SizedBox.shrink();
+    return FutureBuilder<double>(
+      future: _ratioOf(data, bytes),
+      initialData: _ratioCache[data],
+      builder: (context, snap) {
+        final ratio = (snap.data ?? 1.0).clamp(1 / 1.91, 1.25);
+        return AspectRatio(
+          aspectRatio: 1 / ratio,
+          child: Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+        );
+      },
+    );
+  }
+}
+
+/// Imagen completa dentro de un recuadro de tamaño fijo: se ve entera
+/// (sin recortes) y el espacio que sobra se rellena con la misma foto
+/// desenfocada, como hacen las apps de fotos.
+class FramedImage extends StatelessWidget {
+  const FramedImage({super.key, required this.data, this.radius = 16});
+
+  final String data;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _decode(data);
+    if (bytes == null) return Container(color: AppColors.mist);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+          ),
+          Container(color: const Color(0x22FFFFFF)),
+          Image.memory(bytes, fit: BoxFit.contain, gaplessPlayback: true),
+        ],
+      ),
     );
   }
 }

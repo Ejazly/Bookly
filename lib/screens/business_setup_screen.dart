@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 
 import '../models/models.dart';
 import '../services/database.dart';
@@ -6,6 +7,7 @@ import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../utils/format.dart';
 import '../widgets/common.dart';
+import '../widgets/location_map.dart';
 
 /// Datos del negocio: se usa para darlo de alta y para editarlo.
 class BusinessSetupScreen extends StatefulWidget {
@@ -31,6 +33,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final Set<int> _closedDays = {DateTime.sunday};
   bool _saving = false;
   bool _filled = false;
+  LatLng? _location; // dónde está el negocio en el mapa
 
   @override
   void didChangeDependencies() {
@@ -47,6 +50,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _team.add(_StaffDraft(m.name, m.startHour, m.endHour, m.daysOff));
       }
       _category = b.category;
+      if (b.hasLocation) _location = LatLng(b.latitude!, b.longitude!);
       _open = b.openHour;
       _close = b.closeHour;
       _closedDays
@@ -120,6 +124,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       staffMembers: team,
       customCategory: _category == BusinessCategory.otro ? _customCategory.text.trim() : '',
       rating: widget.existing?.rating ?? 0,
+      latitude: _location?.latitude,
+      longitude: _location?.longitude,
     );
 
     setState(() => _saving = true);
@@ -152,6 +158,79 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         onChanged: (v) {
           if (v != null) onChanged(v);
         },
+      ),
+    );
+  }
+
+  /// Negocio de muestra para dibujar el marcador con su color y su logo.
+  Business _previewBusiness() {
+    final e = widget.existing;
+    return Business(
+      id: e?.id ?? '',
+      ownerUid: '',
+      ownerEmail: '',
+      name: _name.text.trim(),
+      category: _category,
+      address: _address.text.trim(),
+      phone: '',
+      openHour: _open,
+      closeHour: _close,
+      closedWeekdays: const {},
+      professionals: const [],
+      themeIndex: e?.themeIndex ?? 0,
+      logoBase64: e?.logoBase64,
+    );
+  }
+
+  Future<void> _pickLocation() async {
+    final point = await Navigator.of(context).push<LatLng>(MaterialPageRoute(
+      builder: (_) => MapPickerScreen(
+        address: _address.text,
+        initial: _location,
+        preview: _previewBusiness(),
+      ),
+    ));
+    if (point != null) setState(() => _location = point);
+  }
+
+  Widget _locationCard() {
+    final point = _location;
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.gray),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (point != null)
+            SizedBox(
+              height: 150,
+              child: IgnorePointer(
+                // El mapa pequeño solo se ve; para moverlo se abre el selector.
+                child: BooklyMap(
+                  key: ValueKey(point),
+                  center: point,
+                  zoom: 16,
+                  marker: BusinessPin(business: _previewBusiness()),
+                ),
+              ),
+            ),
+          ListTile(
+            leading: Icon(
+              point == null ? Icons.add_location_alt_outlined : Icons.edit_location_alt_outlined,
+              color: AppColors.teal,
+            ),
+            title: Text(point == null ? 'Marca tu negocio en el mapa' : 'Ubicación marcada'),
+            subtitle: Text(point == null
+                ? 'Así tus clientes verán dónde estás y cómo llegar.'
+                : 'Toca para cambiarla.'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: _pickLocation,
+          ),
+        ],
       ),
     );
   }
@@ -224,6 +303,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               validator: (v) =>
                   (v ?? '').trim().isEmpty ? 'Escribe la dirección' : null,
             ),
+            const SizedBox(height: 10),
+            _locationCard(),
             const SizedBox(height: 12),
             TextFormField(
               controller: _phone,
@@ -302,7 +383,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ),
             const SectionLabel('Avisos por correo'),
             AppCard(
-              color: const Color(0xFFE6F0F2),
+              color: AppColors.mist,
               child: Row(
                 children: [
                   const Icon(Icons.mark_email_unread_outlined, color: AppColors.teal),

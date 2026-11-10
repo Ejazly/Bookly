@@ -114,6 +114,16 @@ class AppSession extends ChangeNotifier {
     }
   }
 
+  /// Después de verificar el correo: vuelve a leer la cuenta y redibuja.
+  Future<bool> refreshVerification() async {
+    final ok = await AuthService.reloadAndCheckVerified();
+    if (ok) {
+      // Se vuelven a abrir las lecturas con el permiso ya verificado.
+      _onAuthChanged(FirebaseAuth.instance.currentUser);
+    }
+    return ok;
+  }
+
   /// Se llama al terminar el registro (pantalla "¿Cómo usarás Bookly?").
   Future<void> createProfile({
     required String name,

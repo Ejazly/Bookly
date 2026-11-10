@@ -25,6 +25,9 @@ String dayName(DateTime d) => _days[d.weekday - 1];
 /// Nombre corto de un día de la semana (DateTime.monday = 1 ... sunday = 7).
 String weekdayShort(int weekday) => _days[weekday - 1];
 
+/// 1 = "lunes" ... 7 = "domingo".
+String weekdayLong(int weekday) => _daysLong[weekday - 1];
+
 /// Mar 27 oct
 String shortDate(DateTime d) =>
     '${dayName(d)} ${d.day} ${_monthsShort[d.month - 1]}';

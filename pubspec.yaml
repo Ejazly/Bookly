@@ -1,7 +1,7 @@
 name: bookly
 description: "Bookly: encuentra, compara y reserva servicios de belleza y bienestar."
 publish_to: 'none'
-version: 0.2.0+2
+version: 0.4.0+4
 
 environment:
   sdk: ^3.10.0
@@ -21,6 +21,18 @@ dependencies:
   # página de pago de Stripe. La app nunca ve los datos de la tarjeta.
   cloud_functions: ^7.0.0
   url_launcher: ^6.3.0
+  # Videos de las publicaciones: se guardan en Firebase Storage y se reproducen
+  firebase_storage: ^14.0.0
+  video_player: ^2.10.0
+  # Saber si un video está en pantalla para reproducirlo o pausarlo solo
+  visibility_detector: ^0.4.0+2
+  # Mapa del negocio (OpenStreetMap, sin llave de Google)
+  flutter_map: ^8.3.0
+  latlong2: ^0.9.1
+  # Ubicación de la persona para "Cerca de ti" (pide permiso)
+  geolocator: ^14.0.2
+  # Anuncios (Google AdMob). Solo anuncios aptos para todo público.
+  google_mobile_ads: ^9.0.0
 
 dev_dependencies:
   flutter_test:

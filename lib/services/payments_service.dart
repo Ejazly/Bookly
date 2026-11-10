@@ -207,8 +207,4 @@ class Payments {
 
   static Future<PayoutStatus> refreshPayoutStatus() async =>
       PayoutStatus.fromMap(await _call('connectRefreshStatus'));
-
-  /// Panel de Stripe del negocio (saldo, depósitos al banco).
-  static Future<String> dashboardUrl() async =>
-      _url(await _call('connectDashboard'), 'url') ?? (throw PaymentException('No se pudo abrir Stripe.'));
 }

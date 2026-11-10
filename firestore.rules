@@ -10,8 +10,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Con sesión Y con el correo verificado (Google ya viene verificado;
+    // las cuentas con contraseña lo confirman con el enlace que les llega).
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null && request.auth.token.email_verified == true;
     }
 
     function myEmail() {
@@ -34,7 +36,8 @@ service cloud.firestore {
         && request.resource.data.price <= 100000
         && request.resource.data.stock is int
         && request.resource.data.stock >= 0
-        && shortText(request.resource.data.name, 80);
+        && shortText(request.resource.data.name, 80)
+        && shortText(request.resource.data.get('section', ''), 40);
     }
 
     // Texto con largo máximo.
@@ -74,6 +77,11 @@ service cloud.firestore {
         && request.resource.data.ownerUid == request.auth.uid
         // El correo de avisos siempre es el de la cuenta dueña.
         && request.resource.data.ownerEmail == myEmail()
+        // Coordenadas del mapa: números válidos o vacías.
+        && (request.resource.data.get('lat', null) == null
+            || (request.resource.data.lat is number && request.resource.data.lat >= -90 && request.resource.data.lat <= 90))
+        && (request.resource.data.get('lng', null) == null
+            || (request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180))
         // Un negocio real no se puede marcar como "de ejemplo" (no cobra).
         && request.resource.data.get('demo', false) == false
         // Nadie se puede poner calificación a sí mismo.
@@ -119,7 +127,14 @@ service cloud.firestore {
       allow create: if signedIn()
         && (request.resource.data.businessId == request.auth.uid
             || isDemo(request.resource.data.businessId))
-        && shortText(request.resource.data.text, 500);
+        && shortText(request.resource.data.text, 500)
+        // El video solo puede venir de la carpeta del propio negocio en Storage.
+        && (request.resource.data.get('videoPath', null) == null
+            || request.resource.data.videoPath.matches(
+                 'posts/' + request.auth.uid + '/[0-9]+[.](mp4|mov|webm|3gp)'))
+        && (request.resource.data.get('videoUrl', null) == null
+            || request.resource.data.videoUrl.matches(
+                 'https://firebasestorage[.]googleapis[.]com/.*'));
       allow update: if false;
       allow delete: if signedIn() && resource.data.businessId == request.auth.uid;
     }

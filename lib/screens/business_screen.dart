@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../logic/schedule.dart';
 import '../models/models.dart';
 import '../services/database.dart';
 import '../theme/app_colors.dart';
-import '../utils/format.dart';
+import '../widgets/business_info_view.dart';
+import '../widgets/catalog_view.dart';
 import '../widgets/common.dart';
 import '../widgets/images.dart';
 import '../widgets/post_card.dart';
@@ -18,8 +20,9 @@ void openBusiness(BuildContext context, Business business) {
   );
 }
 
-/// Sitio del negocio tal como lo ven los clientes: portada, logo, eslogan,
-/// "acerca de", contacto, servicios, productos, fotos y publicaciones.
+/// Sitio del negocio tal como lo ven los clientes: portada, logo y eslogan,
+/// y pestañas de servicios, productos, fotos, novedades e información
+/// (mapa, dirección, horario, personal y contacto).
 ///
 /// Con [preview] = true el dueño ve su propio sitio sin poder reservar.
 class BusinessScreen extends StatefulWidget {
@@ -33,7 +36,7 @@ class BusinessScreen extends StatefulWidget {
 }
 
 class _BusinessScreenState extends State<BusinessScreen> {
-  int _tab = 0; // 0 Servicios, 1 Productos, 2 Fotos, 3 Publicaciones
+  int _tab = 0; // 0 Servicios, 1 Productos, 2 Fotos, 3 Novedades, 4 Información
   late final Stream<Business?> _business = Database.instance.businessStream(widget.business.id);
   late final Stream<List<Item>> _items = Database.instance.itemsStream(widget.business.id);
   late final Stream<List<GalleryPhoto>> _gallery =
@@ -60,42 +63,98 @@ class _BusinessScreenState extends State<BusinessScreen> {
     );
   }
 
+  static const _tabInfo = [
+    (Icons.content_cut_rounded, 'Servicios'),
+    (Icons.shopping_bag_outlined, 'Productos'),
+    (Icons.photo_library_outlined, 'Fotos'),
+    (Icons.play_circle_outline_rounded, 'Novedades'),
+    (Icons.info_outline_rounded, 'Información'),
+  ];
+
+  /// Pestañas como "pastillas" que se deslizan de lado.
   Widget _tabs(Color accent) {
-    const labels = ['Servicios', 'Productos', 'Fotos', 'Novedades'];
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFDDE3E5))),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < labels.length; i++)
-            Expanded(
-              child: InkWell(
-                onTap: () => setState(() => _tab = i),
-                child: Container(
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: _tab == i ? accent : Colors.transparent,
-                        width: 3,
-                      ),
-                    ),
-                  ),
-                  child: Text(
-                    labels[i],
+    return SizedBox(
+      height: 42,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _tabInfo.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final (icon, label) = _tabInfo[i];
+          final selected = _tab == i;
+          return GestureDetector(
+            onTap: () => setState(() => _tab = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: selected ? accent : Colors.white,
+                borderRadius: BorderRadius.circular(21),
+                border: Border.all(color: selected ? accent : AppColors.gray),
+                boxShadow: selected
+                    ? [BoxShadow(color: accent.withValues(alpha: 0.30), blurRadius: 10, offset: const Offset(0, 4))]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: selected ? Colors.white : accent),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
                     style: TextStyle(
                       fontSize: 13,
-                      color: _tab == i ? accent : AppColors.muted,
-                      fontWeight: _tab == i ? FontWeight.bold : FontWeight.normal,
+                      color: selected ? Colors.white : AppColors.ink,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.w500,
                     ),
                   ),
-                ),
+                ],
               ),
             ),
-        ],
+          );
+        },
       ),
+    );
+  }
+
+  /// Fila corta bajo el nombre: calificación y si está abierto.
+  /// Al tocarla se abre la pestaña Información.
+  Widget _quickInfo(Business b) {
+    final status = openingStatus(b, DateTime.now());
+    final color = status.open ? AppColors.green : AppColors.red;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (b.rating > 0)
+          StatusBadge('★ ${b.rating.toStringAsFixed(1)}',
+              color: const Color(0xFFB57511), background: AppColors.amberSoft),
+        InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => setState(() => _tab = 4),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: status.open ? AppColors.greenSoft : AppColors.redSoft,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.circle, size: 8, color: color),
+                const SizedBox(width: 6),
+                Text(status.text,
+                    style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 2),
+                Icon(Icons.chevron_right_rounded, size: 16, color: color),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -116,20 +175,12 @@ class _BusinessScreenState extends State<BusinessScreen> {
                 : 'Este negocio aún no publica productos.',
           );
         }
-        return Column(
-          children: [
-            for (final item in list)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _ItemCard(
-                  item: item,
-                  accent: b.accent,
-                  onBook: services ? () => _book(b, item) : null,
-                  // Los negocios de ejemplo no venden en línea.
-                  onBuy: !services && !b.demo && item.stock > 0 ? () => _buy(b, item) : null,
-                ),
-              ),
-          ],
+        return CatalogView(
+          items: list,
+          business: b,
+          onBook: services ? (item) => _book(b, item) : null,
+          // Los negocios de ejemplo no venden en línea.
+          onBuy: !services && !b.demo ? (item) => _buy(b, item) : null,
         );
       },
     );
@@ -208,11 +259,11 @@ class _BusinessScreenState extends State<BusinessScreen> {
       initialData: widget.business,
       builder: (context, snapshot) {
         final b = snapshot.data ?? widget.business;
-        final closed = b.closedWeekdays.toList()..sort();
         final Widget content = switch (_tab) {
           1 => _itemsTab(b, services: false),
           2 => _galleryTab(),
           3 => _postsTab(),
+          4 => BusinessInfoView(business: b),
           _ => _itemsTab(b, services: true),
         };
 
@@ -242,47 +293,19 @@ class _BusinessScreenState extends State<BusinessScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        if (b.rating > 0)
-                          StatusBadge('★ ${b.rating.toStringAsFixed(1)}',
-                              color: const Color(0xFFB57511), background: AppColors.amberSoft),
-                        StatusBadge('Horario ${b.hoursText}'),
-                        if (closed.isNotEmpty)
-                          StatusBadge(
-                            'Cierra ${closed.map(weekdayShort).join(', ')}',
-                            color: AppColors.muted,
-                            background: AppColors.light,
-                          ),
-                      ],
-                    ),
-                    if (b.description.isNotEmpty) ...[
-                      const SectionLabel('Acerca de nosotros'),
-                      Text(b.description, style: const TextStyle(height: 1.4)),
-                    ],
-                    const SectionLabel('Nuestro equipo'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final m in b.team)
-                          StatusBadge(
-                            '${m.name} · ${m.hoursText}',
-                            color: b.accent,
-                            background: AppColors.light,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    SocialLinks(business: b),
-                    const SizedBox(height: 14),
+                    _quickInfo(b),
+                    const SizedBox(height: 16),
                     _tabs(b.accent),
-                    const SizedBox(height: 12),
-                    content,
+                    const SizedBox(height: 14),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      // Todo alineado a la izquierda (no al centro).
+                      layoutBuilder: (current, previous) => Stack(
+                        alignment: Alignment.topLeft,
+                        children: [...previous, ?current],
+                      ),
+                      child: KeyedSubtree(key: ValueKey(_tab), child: content),
+                    ),
                   ],
                 ),
               ),
@@ -290,96 +313,6 @@ class _BusinessScreenState extends State<BusinessScreen> {
           ),
         );
       },
-    );
-  }
-}
-
-class _ItemCard extends StatelessWidget {
-  const _ItemCard({required this.item, required this.accent, this.onBook, this.onBuy});
-
-  final Item item;
-  final Color accent;
-  final VoidCallback? onBook; // null = producto (no se agenda)
-  final VoidCallback? onBuy; // null = no se vende en línea
-
-  @override
-  Widget build(BuildContext context) {
-    final i = item;
-    return AppCard(
-      padding: const EdgeInsets.all(10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Base64Image(
-            data: i.imageBase64,
-            width: 72,
-            height: 72,
-            placeholderIcon: i.isService ? Icons.content_cut : Icons.shopping_bag_outlined,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(i.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                if (i.description.isNotEmpty)
-                  Text(i.description,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.muted, fontSize: 12)),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Text(money(i.price),
-                        style: TextStyle(
-                          color: accent,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        )),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        i.isService
-                            ? durationText(i.minutes)
-                            : (i.stock > 0 ? 'Disponible en el negocio' : 'Agotado'),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: !i.isService && i.stock <= 0
-                              ? AppColors.red
-                              : AppColors.muted,
-                        ),
-                      ),
-                    ),
-                    if (onBook != null)
-                      FilledButton(
-                        onPressed: onBook,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.green,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                        child: const Text('Reservar'),
-                      ),
-                    if (onBuy != null)
-                      FilledButton(
-                        onPressed: onBuy,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.green,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                        child: const Text('Comprar'),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

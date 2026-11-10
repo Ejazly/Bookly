@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/models.dart';
 import '../../services/database.dart';
+import '../../services/storage_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common.dart';
 import '../../widgets/post_card.dart';
@@ -38,6 +39,8 @@ class _PostsScreenState extends State<PostsScreen> {
     if (!ok) return;
     try {
       await Database.instance.deletePost(p.id);
+      // Si tenía video, también se borra de Storage para no ocupar espacio.
+      await StorageService.deleteVideo(p.videoPath);
     } catch (e) {
       if (mounted) showMessage(context, 'No se pudo eliminar: $e');
     }
@@ -49,9 +52,9 @@ class _PostsScreenState extends State<PostsScreen> {
       appBar: AppBar(title: const Text('Publicaciones')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _new,
-        backgroundColor: AppColors.green,
+        backgroundColor: AppColors.action,
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.add_photo_alternate_outlined),
+        icon: const Icon(Icons.add_rounded),
         label: const Text('Nueva publicación'),
       ),
       body: StreamBuilder<List<Post>>(
@@ -64,7 +67,7 @@ class _PostsScreenState extends State<PostsScreen> {
             padding: const EdgeInsets.fromLTRB(18, 0, 18, 90),
             children: [
               const Text(
-                'Comparte promociones, trabajos recientes o novedades. '
+                'Comparte promociones, trabajos recientes o novedades con fotos o videos. '
                 'Tus clientes las ven en la sección Novedades.',
                 style: TextStyle(color: AppColors.muted),
               ),

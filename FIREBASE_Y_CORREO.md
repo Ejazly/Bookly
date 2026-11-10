@@ -215,3 +215,55 @@ La primera vez que alguien entra, la app guarda **3 negocios de ejemplo** (Barbe
 - **Una cuenta, dos interfaces.** El perfil (`users/{uid}`) guarda `isClient`, `isBusiness` y `mode` (la interfaz actual). El negocio se guarda con el mismo id que la cuenta (`businesses/{uid}`), por eso cada cuenta tiene un negocio.
 - **Las citas se buscan por Gmail del cliente.** Gracias a eso, las citas que el negocio agrega a mano también aparecen en la app del cliente si escribe su Gmail.
 - **Limitación conocida:** para calcular los horarios ocupados, cualquier usuario con sesión puede leer las citas, incluido el nombre del cliente. En producción se separaría en una colección solo con los horarios ocupados.
+
+---
+
+## Videos en las publicaciones (Firebase Storage)
+
+Los videos pesan demasiado para guardarse dentro de Firestore, así que se guardan en
+**Firebase Storage**. Storage necesita el plan **Blaze** (el mismo que piden los pagos;
+ver [PAGOS_STRIPE.md](PAGOS_STRIPE.md), paso 1).
+
+1. Firebase Console → proyecto **bookly-c0692** → **Storage** → **Comenzar**.
+2. Ubicación: la que te sugiera (por ejemplo `us-central1`) → modo **producción** → **Listo**.
+3. Publica las reglas de Storage y las nuevas de Firestore:
+   ```powershell
+   cd C:\Users\Jazmin\ProyectoFina\bookly_app
+   firebase deploy --only storage,firestore:rules --project bookly-c0692
+   ```
+
+Qué protegen las reglas de `storage.rules`:
+
+- Cada negocio solo puede subir a **su propia carpeta** (`posts/<su uid>/`).
+- Solo se aceptan **videos** (MP4, MOV, WEBM, 3GP) de **máximo 50 MB**.
+- Nadie puede reemplazar el video de otro; solo el dueño puede borrarlo.
+- Firestore revisa que la publicación solo apunte a un video de la carpeta del propio negocio.
+
+## Mapa del negocio
+
+El mapa de la pestaña **Información** usa **OpenStreetMap** (estilo CARTO Voyager):
+no necesita llave de Google ni pago. El negocio marca su ubicación en
+**Cuenta → Datos del negocio → Marca tu negocio en el mapa**. Si no la marca, la app
+busca su dirección automáticamente. El botón **Cómo llegar** abre Google Maps.
+
+## Cuentas con correo y contraseña
+
+Además de Google, se puede crear la cuenta con **nombre de usuario, correo y contraseña**.
+
+1. Firebase Console → **Authentication** → **Sign-in method** → **Agregar proveedor** →
+   **Correo electrónico/contraseña** → activar la primera opción → **Guardar**.
+2. Al registrarse, Firebase manda un correo para **verificar** la dirección. Hasta que la
+   persona abre el enlace, la app muestra "Confirma tu correo" y no deja usar nada más
+   (las reglas de Firestore y Storage también lo exigen).
+3. "¿Olvidaste tu contraseña?" manda un enlace para crear una nueva.
+
+> Si al probar con `flutter run -d chrome` la ventana de Google no muestra tus cuentas,
+> es porque Flutter abre un Chrome "limpio" sin sesiones. Para usar tu Chrome de siempre:
+> `flutter run -d web-server --web-port 8080` y abre `http://localhost:8080`.
+
+## Ubicación ("Cerca de ti")
+
+La app pide permiso de ubicación solo cuando la persona toca **Activar ubicación**.
+La posición se usa dentro del teléfono para calcular distancias: **no se guarda** en la base
+de datos. En Chrome funciona en `localhost`; en Android ya están los permisos en el
+`AndroidManifest.xml`.

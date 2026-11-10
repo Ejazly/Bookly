@@ -30,7 +30,7 @@ class HomeShell extends StatelessWidget {
         selectedIndex: session.clientTab,
         onDestinationSelected: (i) => session.clientTab = i,
         backgroundColor: Colors.white,
-        indicatorColor: const Color(0x331C6470),
+        indicatorColor: AppColors.sky,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),

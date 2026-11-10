@@ -3,6 +3,7 @@
 // `flutter test` sin internet.
 
 import '../models/models.dart';
+import '../utils/format.dart';
 
 /// Cada cuántos minutos se ofrece un horario (10:00, 11:00, 12:00...).
 const int slotStepMinutes = 60;
@@ -131,4 +132,47 @@ bool isRefundable(Appointment a, DateTime now) =>
   upcoming.sort((a, b) => a.start.compareTo(b.start));
   history.sort((a, b) => b.start.compareTo(a.start));
   return (upcoming: upcoming, history: history);
+}
+
+/// ¿Está abierto ahora? Regresa el estado y un texto como
+/// "Abierto · cierra a las 20:00" o "Cerrado · abre mañana a las 10:00".
+({bool open, String text}) openingStatus(Business b, DateTime now) {
+  if (b.isOpenAt(now)) {
+    return (open: true, text: 'Abierto · cierra a las ${b.closeHour}:00');
+  }
+  if (b.isOpenOn(now) && now.hour < b.openHour) {
+    return (open: false, text: 'Cerrado · abre hoy a las ${b.openHour}:00');
+  }
+  for (var i = 1; i <= 7; i++) {
+    final day = now.add(Duration(days: i));
+    if (b.isOpenOn(day)) {
+      final when = i == 1 ? 'mañana' : 'el ${weekdayLong(day.weekday)}';
+      return (open: false, text: 'Cerrado · abre $when a las ${b.openHour}:00');
+    }
+  }
+  return (open: false, text: 'Cerrado por ahora');
+}
+
+/// ¿La persona está trabajando en este momento?
+bool memberOnShift(Business b, StaffMember m, DateTime now) =>
+    b.isOpenAt(now) && m.worksOn(now) && now.hour >= m.startHour && now.hour < m.endHour;
+
+
+/// Agrupa servicios o productos por su clasificación, en el orden en que
+/// aparece cada una. Los que no tienen clasificación van al final en "Otros".
+List<({String name, List<Item> items})> groupBySection(Iterable<Item> items) {
+  final order = <String>[];
+  final groups = <String, List<Item>>{};
+  for (final i in items) {
+    final key = i.section.trim().isEmpty ? '' : i.section.trim();
+    if (!groups.containsKey(key)) {
+      groups[key] = [];
+      if (key.isNotEmpty) order.add(key);
+    }
+    groups[key]!.add(i);
+  }
+  return [
+    for (final k in order) (name: k, items: groups[k]!),
+    if (groups.containsKey('')) (name: order.isEmpty ? 'Todos' : 'Otros', items: groups['']!),
+  ];
 }

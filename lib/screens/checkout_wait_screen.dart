@@ -211,7 +211,7 @@ class _CheckoutWaitScreenState extends State<CheckoutWaitScreen> {
         ),
         const SizedBox(height: 20),
         const AppCard(
-          color: Color(0xFFE6F0F2),
+          color: AppColors.mist,
           child: Text(
             'Modo de prueba: usa la tarjeta 4242 4242 4242 4242, cualquier fecha '
             'futura y cualquier CVV. Con 4000 0000 0000 0002 el banco la rechaza.',

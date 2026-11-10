@@ -67,7 +67,7 @@ class AppCard extends StatelessWidget {
         border: border != null ? Border.all(color: border, width: 2) : null,
         boxShadow: const [
           BoxShadow(
-            color: Color(0x140F4450),
+            color: Color(0x14143F48),
             blurRadius: 8,
             offset: Offset(0, 2),
           ),
@@ -140,7 +140,7 @@ class PrimaryButton extends StatelessWidget {
       child: FilledButton(
         onPressed: loading ? null : onPressed,
         style: FilledButton.styleFrom(
-          backgroundColor: AppColors.green,
+          backgroundColor: AppColors.action,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -402,6 +402,27 @@ class EmptyMessage extends StatelessWidget {
             action!,
           ],
         ],
+      ),
+    );
+  }
+}
+
+
+/// Limita el ancho del contenido en pantallas grandes (computadora), como
+/// hacen Instagram y Facebook, para que las fotos no se vean gigantes.
+class MaxWidth extends StatelessWidget {
+  const MaxWidth({super.key, required this.child, this.width = 620});
+
+  final Widget child;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: width),
+        child: child,
       ),
     );
   }

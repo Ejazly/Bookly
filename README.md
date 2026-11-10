@@ -1,4 +1,4 @@
-# Bookly – App en Flutter (versión 0.3)
+# Bookly – App en Flutter (versión 0.4)
 
 Bookly reúne negocios de servicios como barberías, estéticas, spas y uñas. Tiene **dos interfaces** en la misma app:
 
@@ -10,6 +10,11 @@ Bookly reúne negocios de servicios como barberías, estéticas, spas y uñas. T
 - Al registrarse, cada persona elige si es **Cliente, Negocio o las dos**.
 - Si tiene las dos, cambia de interfaz desde su perfil.
 - **Billetera con Stripe (modo prueba):** el cliente guarda tarjetas y paga anticipos o productos; el negocio conecta su cuenta de Stripe y recibe el dinero menos la comisión de Bookly (5 %). Ver **[PAGOS_STRIPE.md](PAGOS_STRIPE.md)**.
+- **Publicaciones con foto o video** (los videos se guardan en Firebase Storage).
+- **Pestaña Información** en el sitio de cada negocio: mapa con su ubicación, botón *Cómo llegar*, si está abierto, horario de la semana, quién atiende y contacto.
+- **Cerca de ti** en el inicio del cliente: mapa con tu ubicación en vivo y los negocios más cercanos (con distancia y si están abiertos). La ubicación nunca se guarda.
+- **Servicios en carrusel** con imagen grande, agrupados por la clasificación que elige el negocio (Cortes, Barba, Masajes…).
+- Paleta de colores: `#1E5E6B` `#28588B` `#64ABB0` `#ADDCEE` `#DDF5FB`.
 - La cuenta siempre está **vinculada con Google (Gmail)**. A ese correo llegan los avisos: el negocio recibe un correo cada vez que un cliente agenda, cancela o cambia una cita.
 
 ## Cómo correrla

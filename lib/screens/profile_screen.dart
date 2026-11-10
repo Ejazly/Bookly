@@ -153,7 +153,7 @@ class AccountHeader extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        StatusBadge(role, color: AppColors.teal, background: const Color(0x221C6470)),
+        StatusBadge(role, color: AppColors.teal, background: AppColors.mist),
       ],
     );
   }

@@ -161,6 +161,21 @@ class Database {
   Stream<List<Post>> feedStream() =>
       _posts.orderBy('createdAt', descending: true).limit(50).snapshots().map(_postsFrom);
 
+  /// Cuántos días se muestra una publicación en Novedades.
+  static const int feedDays = 8;
+
+  /// Publicaciones de los últimos [feedDays] días (las más viejas ya no salen
+  /// en Novedades, pero siguen en el sitio de cada negocio).
+  Stream<List<Post>> recentFeedStream() {
+    final since = DateTime.now().subtract(const Duration(days: feedDays));
+    return _posts
+        .where('createdAt', isGreaterThan: Timestamp.fromDate(since))
+        .orderBy('createdAt', descending: true)
+        .limit(150)
+        .snapshots()
+        .map(_postsFrom);
+  }
+
   Stream<List<Post>> postsByBusiness(String businessId) =>
       _posts.where('businessId', isEqualTo: businessId).snapshots().map(_postsFrom);
 

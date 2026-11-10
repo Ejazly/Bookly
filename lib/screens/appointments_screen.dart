@@ -102,7 +102,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   ),
               if (_segment == 0 && list.isNotEmpty)
                 const AppCard(
-                  color: Color(0xFFE6F0F2),
+                  color: AppColors.mist,
                   child: Row(
                     children: [
                       Icon(Icons.mark_email_read_outlined, color: AppColors.teal),

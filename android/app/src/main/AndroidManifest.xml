@@ -1,10 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Internet para Firebase y para abrir la página de pago de Stripe. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Ubicación para "Negocios cerca de ti" (solo mientras se usa la app). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <application
         android:label="bookly"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- ID de la app en AdMob. Este es el de PRUEBA de Google:
+             cámbialo por el tuyo antes de publicar (ver ANUNCIOS.md). -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

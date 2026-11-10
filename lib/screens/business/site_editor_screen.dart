@@ -181,7 +181,7 @@ class _SiteEditorScreenState extends State<SiteEditorScreen> {
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: const Color(0x221C6470),
+            backgroundColor: AppColors.mist,
             child: Icon(icon, color: AppColors.teal),
           ),
           const SizedBox(width: 12),

@@ -1,0 +1,31 @@
+rules_version = '2';
+
+// Reglas de Firebase Storage (videos de las publicaciones).
+// Se publican con:  firebase deploy --only storage
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // posts/{uid}/{archivo}: cada negocio solo sube a SU carpeta.
+    match /posts/{uid}/{file} {
+      // Cualquier persona con sesión puede ver los videos.
+      allow read: if request.auth != null && request.auth.token.email_verified == true;
+
+      // Solo el dueño, solo videos, máximo 50 MB y con nombre "numero.ext".
+      allow create: if request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.uid == uid
+        && request.resource.size < 50 * 1024 * 1024
+        && request.resource.contentType.matches('video/(mp4|quicktime|webm|3gpp)')
+        && file.matches('[0-9]+[.](mp4|mov|webm|3gp)');
+
+      // Un video publicado no se reemplaza; solo se puede borrar.
+      allow update: if false;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Todo lo demás está cerrado.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

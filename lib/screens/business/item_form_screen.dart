@@ -29,12 +29,78 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
       text: widget.existing == null ? '' : _priceText(widget.existing!.price));
   late final TextEditingController _stock =
       TextEditingController(text: '${widget.existing?.stock ?? 0}');
+  late final TextEditingController _section =
+      TextEditingController(text: widget.existing?.section ?? '');
+  late final Stream<List<Item>> _items = Database.instance.itemsStream(widget.business.id);
 
   late ItemKind _kind = widget.existing?.kind ?? ItemKind.servicio;
   late int _minutes = widget.existing?.minutes ?? 60;
   late String? _image = widget.existing?.imageBase64;
   late bool _active = widget.existing?.active ?? true;
   bool _saving = false;
+
+  /// "  cortes  " → "Cortes"
+  static String _cleanSection(String v) {
+    final t = v.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (t.isEmpty) return '';
+    return t[0].toUpperCase() + t.substring(1);
+  }
+
+  /// Ideas de clasificación según el tipo de negocio.
+  List<String> get _ideas {
+    final services = _kind == ItemKind.servicio;
+    if (!services) return const ['Cuidado del cabello', 'Barba', 'Piel', 'Uñas', 'Accesorios'];
+    return switch (widget.business.category) {
+      BusinessCategory.barberias => const ['Cortes', 'Barba', 'Paquetes', 'Tratamientos'],
+      BusinessCategory.esteticas => const ['Cortes', 'Color', 'Peinados', 'Tratamientos', 'Maquillaje'],
+      BusinessCategory.spas => const ['Masajes', 'Faciales', 'Corporales', 'Paquetes'],
+      BusinessCategory.unas => const ['Manos', 'Pies', 'Diseños', 'Retiro'],
+      BusinessCategory.otro => const ['Básicos', 'Especiales', 'Paquetes'],
+    };
+  }
+
+  Widget _sectionField() {
+    return StreamBuilder<List<Item>>(
+      stream: _items,
+      builder: (context, snap) {
+        final used = <String>{
+          for (final i in snap.data ?? const <Item>[])
+            if (i.kind == _kind && i.section.isNotEmpty) i.section,
+        };
+        final options = [...used, ..._ideas.where((i) => !used.contains(i))];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _section,
+              textCapitalization: TextCapitalization.sentences,
+              maxLength: 40,
+              onChanged: (_) => setState(() {}),
+              decoration: fieldDecoration('Ej. Cortes', icon: Icons.category_outlined).copyWith(
+                labelText: 'Clasificación (opcional)',
+                helperText: 'Tus clientes verán tus servicios agrupados así, en carruseles.',
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final o in options)
+                  ChoiceChip(
+                    label: Text(o),
+                    selected: _cleanSection(_section.text) == o,
+                    showCheckmark: false,
+                    onSelected: (_) => setState(() => _section.text = o),
+                    avatar: used.contains(o) ? const Icon(Icons.folder_outlined, size: 16) : null,
+                  ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   static String _priceText(double p) =>
       p == p.roundToDouble() ? p.toStringAsFixed(0) : p.toStringAsFixed(2);
@@ -45,6 +111,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
     _description.dispose();
     _price.dispose();
     _stock.dispose();
+    _section.dispose();
     super.dispose();
   }
 
@@ -60,6 +127,7 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
       stock: _kind == ItemKind.producto ? int.parse(_stock.text.trim()) : 0,
       imageBase64: _image,
       active: _active,
+      section: _cleanSection(_section.text),
     );
     setState(() => _saving = true);
     try {
@@ -157,6 +225,8 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
               decoration: fieldDecoration('Nombre'),
               validator: (v) => (v ?? '').trim().isEmpty ? 'Escribe el nombre' : null,
             ),
+            const SizedBox(height: 10),
+            _sectionField(),
             const SizedBox(height: 10),
             TextFormField(
               controller: _description,

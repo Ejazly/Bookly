@@ -115,11 +115,11 @@ extension BusinessCategoryInfo on BusinessCategory {
 
   /// Colores del degradado que se usa como portada.
   List<Color> get colors => switch (this) {
-        BusinessCategory.barberias => const [Color(0xFF2A7D89), Color(0xFF0F4450)],
-        BusinessCategory.esteticas => const [Color(0xFFB37FA8), Color(0xFF1C6470)],
-        BusinessCategory.spas => const [Color(0xFF43B376), Color(0xFF1C6470)],
-        BusinessCategory.unas => const [Color(0xFFE38B6F), Color(0xFF1C6470)],
-        BusinessCategory.otro => const [Color(0xFF2B5FA3), Color(0xFF1C6470)],
+        BusinessCategory.barberias => const [Color(0xFF1E5E6B), Color(0xFF143F48)],
+        BusinessCategory.esteticas => const [Color(0xFF28588B), Color(0xFF1E5E6B)],
+        BusinessCategory.spas => const [Color(0xFF3E8C92), Color(0xFF1E5E6B)],
+        BusinessCategory.unas => const [Color(0xFF4F7FB0), Color(0xFF28588B)],
+        BusinessCategory.otro => const [Color(0xFF2F7380), Color(0xFF28588B)],
       };
 }
 
@@ -132,9 +132,9 @@ BusinessCategory parseCategory(Object? v) => BusinessCategory.values.firstWhere(
 /// El índice 0 significa "según la categoría".
 const List<List<Color>> sitePalettes = [
   [], // 0 = colores de la categoría
-  [Color(0xFF1C6470), Color(0xFF0F4450)], // turquesa Bookly
-  [Color(0xFF2B5FA3), Color(0xFF1B3B66)], // azul
-  [Color(0xFF2E9E5B), Color(0xFF1C6470)], // verde
+  [Color(0xFF1E5E6B), Color(0xFF28588B)], // turquesa Bookly
+  [Color(0xFF28588B), Color(0xFF1B3B66)], // azul
+  [Color(0xFF2E9673), Color(0xFF1E5E6B)], // verde
   [Color(0xFFB37FA8), Color(0xFF6D3B63)], // lila
   [Color(0xFFE38B6F), Color(0xFFB0473A)], // coral
   [Color(0xFF3A3A3A), Color(0xFF111111)], // negro
@@ -209,6 +209,8 @@ class Business {
     this.whatsapp = '',
     this.instagram = '',
     this.facebook = '',
+    this.latitude,
+    this.longitude,
   });
 
   final String id;
@@ -236,6 +238,12 @@ class Business {
   final String whatsapp;
   final String instagram;
   final String facebook;
+
+  /// Ubicación en el mapa (la marca el negocio). null = todavía no la marca.
+  final double? latitude;
+  final double? longitude;
+
+  bool get hasLocation => latitude != null && longitude != null;
 
   /// Colores del sitio: los que eligió el negocio o los de su categoría.
   List<Color> get colors {
@@ -313,7 +321,15 @@ class Business {
       whatsapp: _string(m['whatsapp']),
       instagram: _string(m['instagram']),
       facebook: _string(m['facebook']),
+      latitude: _coordinate(m['lat'], 90),
+      longitude: _coordinate(m['lng'], 180),
     );
+  }
+
+  static double? _coordinate(Object? v, double limit) {
+    if (v is! num) return null;
+    final d = v.toDouble();
+    return d.isFinite && d.abs() <= limit ? d : null;
   }
 
   /// Datos generales (pantalla "Datos del negocio").
@@ -332,6 +348,8 @@ class Business {
         'customCategory': customCategory,
         'rating': rating,
         'demo': demo,
+        'lat': latitude,
+        'lng': longitude,
       };
 
   /// Diseño del sitio (apartado "Mi sitio").
@@ -383,6 +401,8 @@ class Business {
       whatsapp: whatsapp,
       instagram: instagram,
       facebook: facebook,
+      latitude: latitude,
+      longitude: longitude,
     );
   }
 }
@@ -425,6 +445,7 @@ class Item {
     this.stock = 0,
     this.imageBase64,
     this.active = true,
+    this.section = '',
   });
 
   final String id; // vacío cuando todavía no se guarda
@@ -436,6 +457,9 @@ class Item {
   final int stock; // solo productos
   final String? imageBase64; // imagen comprimida guardada como texto
   final bool active; // si se muestra a los clientes
+
+  /// Clasificación que elige el negocio (ej. "Cortes", "Barba"). Vacío = sin clasificar.
+  final String section;
 
   bool get isService => kind == ItemKind.servicio;
   double get deposit => depositFor(price);
@@ -451,10 +475,12 @@ class Item {
       stock: _int(m['stock']),
       imageBase64: _nullableString(m['imageBase64']),
       active: _bool(m['active'], true),
+      section: _string(m['section']).trim(),
     );
   }
 
   Map<String, dynamic> toMap() => {
+        'section': section,
         'kind': kind.name,
         'name': name,
         'description': description,
@@ -479,6 +505,8 @@ class Post {
     required this.category,
     required this.text,
     this.imageBase64,
+    this.videoUrl,
+    this.videoPath,
     this.createdAt,
   });
 
@@ -488,7 +516,13 @@ class Post {
   final BusinessCategory category;
   final String text;
   final String? imageBase64;
+
+  /// Video guardado en Firebase Storage (`posts/{uid}/...`).
+  final String? videoUrl;
+  final String? videoPath;
   final DateTime? createdAt;
+
+  bool get hasVideo => videoUrl != null && videoUrl!.isNotEmpty;
 
   factory Post.fromMap(String id, Map<String, dynamic> m) {
     return Post(
@@ -498,6 +532,8 @@ class Post {
       category: parseCategory(m['category']),
       text: _string(m['text']),
       imageBase64: _nullableString(m['imageBase64']),
+      videoUrl: _nullableString(m['videoUrl']),
+      videoPath: _nullableString(m['videoPath']),
       createdAt: readDate(m['createdAt']),
     );
   }
@@ -508,6 +544,8 @@ class Post {
         'category': category.name,
         'text': text,
         'imageBase64': imageBase64,
+        if (videoUrl != null) 'videoUrl': videoUrl,
+        if (videoPath != null) 'videoPath': videoPath,
       };
 }
 

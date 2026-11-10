@@ -161,3 +161,16 @@ Los negocios de ejemplo (demo) se pueden reservar **sin cobro**, para probar sin
 | Las citas viejas no se ven ocupadas para otros clientes | Se crearon antes del servidor (no tienen registro en `busy`) | Son datos de prueba; el servidor de todas formas no deja reservar encima |
 
 Para ver errores del servidor: `firebase functions:log --project bookly-c0692`.
+
+## Nota: cuentas de negocio v2, sin panel Express
+
+Stripe rechaza las cuentas Express cuando la plataforma tiene a Stripe como responsable de
+pérdidas. Por eso `connectOnboarding` crea la cuenta con la **API v2** (`stripe.v2.core.accounts`,
+`dashboard: none`, capacidades `card_payments` y `stripe_balance.stripe_transfers`) y el registro
+se hace con `v2.core.accountLinks` (`account_onboarding`). `connectRefreshStatus` lee la cuenta
+con `include` de `configuration.merchant` y `configuration.recipient`. Los cobros siguen siendo
+destination charges con el id `acct_...`. Ya no existe el panel Express: la función
+`connectDashboard` solo responde un aviso y el botón se quitó de la app; el negocio consulta sus
+cobros en *Cobros y ventas*. Si Stripe dice "signed up for Connect", activa Connect en
+Dashboard → Connect → Empezar. Una cuenta Express creada antes debe borrarse de
+`stripeAccounts/{uid}` para crear una v2 nueva.

@@ -27,6 +27,7 @@ const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue, Timestamp} = require('firebase-admin/firestore');
 const Stripe = require('stripe');
 const {checkBusinessHours, pickProfessional} = require('./schedule');
+const {connectCapabilities, usableAccount} = require('./connect_capabilities');
 
 initializeApp();
 const db = getFirestore();
@@ -83,6 +84,38 @@ function returnUrl(status) {
 // ---------------------------------------------------------------------------
 function fail(code, message) {
   throw new HttpsError(code, message);
+}
+
+/**
+ * Envuelve una función para que los errores de Stripe lleguen a la app con
+ * un mensaje claro (y queden en el registro: firebase functions:log).
+ */
+function safe(name, handler) {
+  return async (request) => {
+    try {
+      return await handler(request);
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      logger.error(`${name} falló`, {type: err && err.type, code: err && err.code, message: err && err.message});
+      const type = err && err.type;
+      if (type === 'StripeAuthenticationError') {
+        fail('failed-precondition', 'La llave secreta de Stripe no es válida. Revisa STRIPE_SECRET_KEY (debe empezar con sk_test_) y vuelve a publicar las funciones.');
+      }
+      if (type === 'StripePermissionError') {
+        fail('failed-precondition', 'La llave de Stripe no tiene permiso para esto. Usa la clave secreta estándar (sk_test_), no una restringida.');
+      }
+      if (/signed up for Connect/i.test(String(err && err.message))) {
+        fail('failed-precondition', 'Activa Connect en tu cuenta de Stripe: Dashboard → Connect → Empezar.');
+      }
+      if (type === 'StripeInvalidRequestError') {
+        fail('failed-precondition', `Stripe rechazó la solicitud: ${err.message}`);
+      }
+      if (type === 'StripeConnectionError' || type === 'StripeAPIError') {
+        fail('unavailable', 'Stripe no respondió. Inténtalo de nuevo en un momento.');
+      }
+      throw err;
+    }
+  };
 }
 
 function requireAuth(request) {
@@ -203,18 +236,51 @@ async function getItem(businessId, itemId) {
   return item;
 }
 
-/** Cuenta de Stripe del negocio (solo el servidor la puede leer). */
-async function getConnectedAccount(businessId) {
+/** Registro crudo de stripeAccounts (puede ser viejo, de la API v1). */
+async function getStoredAccount(businessId) {
   const snap = await db.collection('stripeAccounts').doc(businessId).get();
   return snap.exists ? snap.data() : null;
 }
 
+/** Cuenta de Stripe v2 del negocio; los registros viejos (v1) cuentan como "sin cuenta". */
+async function getConnectedAccount(businessId) {
+  return usableAccount(await getStoredAccount(businessId));
+}
+
+/** ¿El servidor está usando la llave de PRUEBA de Stripe? */
+function isTestMode() {
+  return STRIPE_SECRET_KEY.value().startsWith('sk_test_');
+}
+
+/**
+ * Cuenta a la que va el dinero. En MODO DE PRUEBA, si el negocio todavía
+ * no conecta Stripe, el cobro se hace igual pero se queda en la cuenta de
+ * Bookly ({accountId: null}). Con dinero real esto nunca pasa: se exige que
+ * el negocio tenga sus cobros activos.
+ */
 async function requirePayableBusiness(businessId) {
   const account = await getConnectedAccount(businessId);
-  if (!account || !account.chargesEnabled) {
-    fail('failed-precondition', 'Este negocio todavía no puede recibir pagos en línea.');
-  }
-  return account;
+  if (account && account.chargesEnabled) return account;
+  if (isTestMode()) return {accountId: null};
+  fail('failed-precondition', 'Este negocio todavía no puede recibir pagos en línea.');
+}
+
+/** Datos para repartir el pago al negocio (vacío si se queda en Bookly). */
+function transferFor(account, amountCents) {
+  return account && account.accountId
+    ? {application_fee_amount: feeFor(amountCents), transfer_data: {destination: account.accountId}}
+    : {};
+}
+
+/** Reembolso completo; si el pago se repartió al negocio, se le descuenta a él. */
+async function refundPayment(paymentIntentId, metadata, idempotencyKey) {
+  const pi = await stripe().paymentIntents.retrieve(paymentIntentId);
+  const split = Boolean(pi.transfer_data && pi.transfer_data.destination);
+  return stripe().refunds.create({
+    payment_intent: paymentIntentId,
+    ...(split ? {reverse_transfer: true, refund_application_fee: true} : {}),
+    metadata,
+  }, {idempotencyKey});
 }
 
 /** Cliente de Stripe de cada usuario (para guardar sus tarjetas). */
@@ -288,7 +354,7 @@ function whenText(startMs) {
 // ---------------------------------------------------------------------------
 // Reservar una cita pagando el anticipo
 // ---------------------------------------------------------------------------
-exports.startBooking = onCall(callOptions, async (request) => {
+exports.startBooking = onCall(callOptions, safe('startBooking', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'booking', 10);
   const data = request.data || {};
@@ -371,8 +437,7 @@ exports.startBooking = onCall(callOptions, async (request) => {
         },
       }],
       payment_intent_data: {
-        application_fee_amount: feeFor(depositCents),
-        transfer_data: {destination: account.accountId},
+        ...transferFor(account, depositCents),
         description: `Anticipo Bookly · ${appointment.businessName}`,
         metadata: {kind: 'appointment', refId: apptRef.id, uid: user.uid},
       },
@@ -392,12 +457,12 @@ exports.startBooking = onCall(callOptions, async (request) => {
     if (err instanceof HttpsError) throw err;
     fail('unavailable', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
   }
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Comprar un producto
 // ---------------------------------------------------------------------------
-exports.startOrder = onCall(callOptions, async (request) => {
+exports.startOrder = onCall(callOptions, safe('startOrder', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'order', 10);
   const data = request.data || {};
@@ -464,8 +529,7 @@ exports.startOrder = onCall(callOptions, async (request) => {
         },
       }],
       payment_intent_data: {
-        application_fee_amount: feeFor(order.totalCents),
-        transfer_data: {destination: account.accountId},
+        ...transferFor(account, order.totalCents),
         description: `Compra Bookly · ${order.businessName}`,
         metadata: {kind: 'order', refId: orderRef.id, uid: user.uid},
       },
@@ -483,7 +547,7 @@ exports.startOrder = onCall(callOptions, async (request) => {
     if (err instanceof HttpsError) throw err;
     fail('unavailable', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
   }
-});
+}));
 
 /** Regresa las piezas apartadas de un pedido que no se pagó. */
 async function releaseOrder(orderId) {
@@ -513,7 +577,7 @@ async function releaseAppointment(appointmentId) {
 // ---------------------------------------------------------------------------
 // Cancelar un pago que se quedó a medias
 // ---------------------------------------------------------------------------
-exports.cancelPending = onCall(callOptions, async (request) => {
+exports.cancelPending = onCall(callOptions, safe('cancelPending', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'cancelPending', 20);
   const data = request.data || {};
@@ -535,12 +599,12 @@ exports.cancelPending = onCall(callOptions, async (request) => {
   if (kind === 'order') await releaseOrder(id);
   else await releaseAppointment(id);
   return {status: 'expirada'};
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Cancelar una cita (con reembolso cuando aplica)
 // ---------------------------------------------------------------------------
-exports.cancelAppointment = onCall(callOptions, async (request) => {
+exports.cancelAppointment = onCall(callOptions, safe('cancelAppointment', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'cancel', 20);
   const id = readId((request.data || {}).appointmentId, 'cita');
@@ -559,12 +623,11 @@ exports.cancelAppointment = onCall(callOptions, async (request) => {
   const refundable = paidCents > 0 && (isBusiness || startMs - Date.now() >= 24 * 3600000);
   let refundId = null;
   if (refundable) {
-    const refund = await stripe().refunds.create({
-      payment_intent: a.paymentIntentId,
-      reverse_transfer: true,
-      refund_application_fee: true,
-      metadata: {kind: 'appointment', refId: id},
-    }, {idempotencyKey: `refund-appointment-${id}`});
+    const refund = await refundPayment(
+      a.paymentIntentId,
+      {kind: 'appointment', refId: id},
+      `refund-appointment-${id}`,
+    );
     refundId = refund.id;
   }
 
@@ -593,12 +656,12 @@ exports.cancelAppointment = onCall(callOptions, async (request) => {
     }
   });
   return {refunded: refundable, amountCents: refundable ? paidCents : 0};
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Reprogramar una cita
 // ---------------------------------------------------------------------------
-exports.rescheduleAppointment = onCall(callOptions, async (request) => {
+exports.rescheduleAppointment = onCall(callOptions, safe('rescheduleAppointment', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'reschedule', 10);
   const data = request.data || {};
@@ -631,12 +694,12 @@ exports.rescheduleAppointment = onCall(callOptions, async (request) => {
     return {professional: pro, start: startMs};
   });
   return result;
-});
+}));
 
 // ---------------------------------------------------------------------------
 // El negocio agrega a una persona a su agenda
 // ---------------------------------------------------------------------------
-exports.addManualAppointment = onCall(callOptions, async (request) => {
+exports.addManualAppointment = onCall(callOptions, safe('addManualAppointment', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'manual', 30);
   const data = request.data || {};
@@ -699,12 +762,12 @@ exports.addManualAppointment = onCall(callOptions, async (request) => {
     return appt;
   });
   return {appointmentId: ref.id, professional: appointment.professional};
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Billetera del cliente: tarjetas guardadas en Stripe
 // ---------------------------------------------------------------------------
-exports.walletMethods = onCall(callOptions, async (request) => {
+exports.walletMethods = onCall(callOptions, safe('walletMethods', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'wallet', 30);
   const customerId = await existingCustomer(user.uid);
@@ -719,9 +782,9 @@ exports.walletMethods = onCall(callOptions, async (request) => {
       expYear: pm.card ? pm.card.exp_year : 0,
     })),
   };
-});
+}));
 
-exports.walletSetup = onCall(callOptions, async (request) => {
+exports.walletSetup = onCall(callOptions, safe('walletSetup', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'walletSetup', 5);
   const customerId = await ensureCustomer(user);
@@ -734,9 +797,9 @@ exports.walletSetup = onCall(callOptions, async (request) => {
     cancel_url: returnUrl('tarjeta_cancelada'),
   });
   return {url: session.url};
-});
+}));
 
-exports.walletRemoveMethod = onCall(callOptions, async (request) => {
+exports.walletRemoveMethod = onCall(callOptions, safe('walletRemoveMethod', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'walletRemove', 10);
   const pmId = (request.data || {}).paymentMethodId;
@@ -748,7 +811,7 @@ exports.walletRemoveMethod = onCall(callOptions, async (request) => {
   if (pm.customer !== customerId) fail('permission-denied', 'Ese método de pago no es tuyo.');
   await stripe().paymentMethods.detach(pmId);
   return {ok: true};
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Cobros del negocio: cuenta de Stripe Connect
@@ -759,59 +822,86 @@ async function requireOwnBusiness(uid) {
   return snap.data();
 }
 
-exports.connectOnboarding = onCall(callOptions, async (request) => {
+/**
+ * Cuentas de cobro de los negocios: API v2 de Stripe (accounts v2).
+ * La plataforma tiene a Stripe como responsable de pérdidas, así que NO se
+ * puede usar el panel Express (dashboard "none"). Los cobros siguen siendo
+ * destination charges con el id de la cuenta (acct_...), igual que antes.
+ */
+exports.connectOnboarding = onCall(callOptions, safe('connectOnboarding', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'connect', 5);
-  const business = await requireOwnBusiness(user.uid);
+  await requireOwnBusiness(user.uid);
   const ref = db.collection('stripeAccounts').doc(user.uid);
-  let account = await getConnectedAccount(user.uid);
+  const stored = await getStoredAccount(user.uid);
+  let account = usableAccount(stored);
   if (!account) {
-    const created = await stripe().accounts.create({
-      type: 'express',
-      country: 'MX',
-      email: user.email,
-      business_profile: {name: business.name || undefined, product_description: 'Servicios agendados en Bookly'},
-      capabilities: {card_payments: {requested: true}, transfers: {requested: true}},
+    // Sin cuenta, o con una vieja (API v1): se crea una v2 y se conserva el id viejo.
+    const created = await stripe().v2.core.accounts.create({
+      contact_email: user.email,
+      identity: {country: 'mx'},
+      dashboard: 'none',
+      defaults: {responsibilities: {fees_collector: 'application', losses_collector: 'stripe'}},
+      configuration: {
+        merchant: {capabilities: {card_payments: {requested: true}}},
+        recipient: {capabilities: {stripe_balance: {stripe_transfers: {requested: true}}}},
+      },
       metadata: {uid: user.uid},
-    }, {idempotencyKey: `account-${user.uid}`});
-    account = {accountId: created.id, chargesEnabled: false};
-    await ref.set({...account, createdAt: FieldValue.serverTimestamp()});
+    }, {idempotencyKey: `account-v2-${user.uid}`});
+    account = {accountId: created.id, chargesEnabled: false, apiVersion: 'v2'};
+    const update = {...account, updatedAt: FieldValue.serverTimestamp()};
+    if (stored && stored.accountId) update.legacyAccountId = stored.accountId;
+    if (!stored) update.createdAt = FieldValue.serverTimestamp();
+    await ref.set(update, {merge: true});
   }
-  const link = await stripe().accountLinks.create({
+  const link = await stripe().v2.core.accountLinks.create({
     account: account.accountId,
-    type: 'account_onboarding',
-    refresh_url: returnUrl('negocio_reintentar'),
-    return_url: returnUrl('negocio_ok'),
+    use_case: {
+      type: 'account_onboarding',
+      account_onboarding: {
+        refresh_url: returnUrl('negocio_reintentar'),
+        return_url: returnUrl('negocio_ok'),
+      },
+    },
   });
   return {url: link.url};
-});
+}));
 
-exports.connectRefreshStatus = onCall(callOptions, async (request) => {
+exports.connectRefreshStatus = onCall(callOptions, safe('connectRefreshStatus', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'connectStatus', 20);
+  // Un registro viejo (no v2) cuenta como "sin cuenta": no se llama a la API v2.
   const account = await getConnectedAccount(user.uid);
   const status = {connected: false, chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false};
-  if (account) {
-    const a = await stripe().accounts.retrieve(account.accountId);
+  if (!account) {
+    const stored = await getStoredAccount(user.uid);
+    if (stored && stored.chargesEnabled) {
+      await db.collection('stripeAccounts').doc(user.uid).update({chargesEnabled: false});
+    }
+  } else {
+    const a = await stripe().v2.core.accounts.retrieve(account.accountId, {
+      include: ['configuration.merchant', 'configuration.recipient'],
+    });
+    const caps = connectCapabilities(a);
     status.connected = true;
-    status.chargesEnabled = a.charges_enabled === true;
-    status.payoutsEnabled = a.payouts_enabled === true;
-    status.detailsSubmitted = a.details_submitted === true;
+    status.chargesEnabled = caps.cardPayments;
+    status.payoutsEnabled = caps.transfers;
+    // En cuentas v2 no hay "details_submitted": se considera enviado cuando
+    // ya están activos el cobro con tarjeta y las transferencias.
+    status.detailsSubmitted = caps.cardPayments && caps.transfers;
     await db.collection('stripeAccounts').doc(user.uid).update({chargesEnabled: status.chargesEnabled});
   }
   // Estado público (sin el id de la cuenta) para que los clientes sepan si pueden pagar.
   await db.collection('paymentStatus').doc(user.uid).set({...status, updatedAt: FieldValue.serverTimestamp()});
   return status;
-});
+}));
 
-exports.connectDashboard = onCall(callOptions, async (request) => {
-  const user = requireAuth(request);
-  await rateLimit(user.uid, 'dashboard', 10);
-  const account = await getConnectedAccount(user.uid);
-  if (!account) fail('failed-precondition', 'Primero conecta tu cuenta de cobros.');
-  const link = await stripe().accounts.createLoginLink(account.accountId);
-  return {url: link.url};
-});
+// Las cuentas v2 no tienen panel Express; se conserva la función solo para
+// que versiones viejas de la app reciban un mensaje claro.
+exports.connectDashboard = onCall(callOptions, safe('connectDashboard', async (request) => {
+  requireAuth(request);
+  fail('failed-precondition', 'Stripe ya no ofrece un panel aparte para tu cuenta; consulta tus cobros en Cobros y ventas.');
+}));
 
 // ---------------------------------------------------------------------------
 // Webhook: Stripe avisa cuando un pago se completó o venció
@@ -920,12 +1010,11 @@ async function handlePaid(session) {
 
   // Pagó tarde (ya había vencido) o el monto no cuadra: se devuelve el dinero.
   if ((outcome === 'late' || outcome === 'mismatch') && paymentIntentId) {
-    await stripe().refunds.create({
-      payment_intent: paymentIntentId,
-      reverse_transfer: true,
-      refund_application_fee: true,
-      metadata: {kind: kind || '', refId, reason: outcome},
-    }, {idempotencyKey: `refund-${outcome}-${refId}`});
+    await refundPayment(
+      paymentIntentId,
+      {kind: kind || '', refId, reason: outcome},
+      `refund-${outcome}-${refId}`,
+    );
     await ref.update({status: 'reembolsada', paymentIntentId});
   }
 }

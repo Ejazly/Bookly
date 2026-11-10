@@ -54,7 +54,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(title: const Text('Inventario')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _open(),
-        backgroundColor: AppColors.green,
+        backgroundColor: AppColors.action,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
         label: const Text('Agregar servicio o producto'),
@@ -174,7 +174,7 @@ class _ItemTile extends StatelessWidget {
     final StatusBadge badge;
     if (i.isService) {
       badge = StatusBadge('Servicio · ${durationText(i.minutes)}',
-          color: AppColors.teal, background: const Color(0x221C6470));
+          color: AppColors.teal, background: AppColors.mist);
     } else if (i.stock <= 0) {
       badge = const StatusBadge('Agotado', color: AppColors.red, background: AppColors.redSoft);
     } else if (i.stock <= 3) {
@@ -213,6 +213,8 @@ class _ItemTile extends StatelessWidget {
                     runSpacing: 4,
                     children: [
                       badge,
+                      if (i.section.isNotEmpty)
+                        StatusBadge(i.section, color: AppColors.blue, background: AppColors.mist),
                       if (!i.active)
                         const StatusBadge('Oculto',
                             color: AppColors.muted, background: AppColors.light),
@@ -228,7 +230,7 @@ class _ItemTile extends StatelessWidget {
                     tooltip: 'Sumar 1',
                     visualDensity: VisualDensity.compact,
                     onPressed: () => onStock(1),
-                    icon: const Icon(Icons.add_circle_outline, color: AppColors.green),
+                    icon: const Icon(Icons.add_circle_outline, color: AppColors.action),
                   ),
                   IconButton(
                     tooltip: 'Restar 1',

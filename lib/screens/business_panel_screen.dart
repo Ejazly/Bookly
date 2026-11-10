@@ -36,7 +36,7 @@ class BusinessShell extends StatelessWidget {
         selectedIndex: session.businessTab,
         onDestinationSelected: (i) => session.businessTab = i,
         backgroundColor: Colors.white,
-        indicatorColor: const Color(0x331C6470),
+        indicatorColor: AppColors.sky,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.calendar_month_outlined),

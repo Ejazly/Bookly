@@ -64,10 +64,6 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
         await Payments.openStripePage(await Payments.connectUrl());
       });
 
-  Future<void> _dashboard() => _run(() async {
-        await Payments.openStripePage(await Payments.dashboardUrl());
-      });
-
   Future<void> _refresh({bool quiet = false}) async {
     if (_busy) return;
     if (quiet) {
@@ -139,12 +135,6 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
               label: s.connected ? 'Continuar en Stripe' : 'Conectar con Stripe',
               loading: _busy,
               onPressed: _connect,
-            )
-          else
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _dashboard,
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Ver saldo y depósitos en Stripe'),
             ),
           const SizedBox(height: 6),
           TextButton.icon(

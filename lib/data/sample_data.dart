@@ -23,6 +23,8 @@ final List<Business> demoBusinesses = [
         'Usamos toalla caliente y productos profesionales.',
     themeIndex: 6,
     instagram: 'barberiaelclasico',
+    latitude: 20.5917,
+    longitude: -100.4125,
   ),
   const Business(
     id: 'demo_2',
@@ -41,6 +43,8 @@ final List<Business> demoBusinesses = [
     slogan: 'Tu cambio de look empieza aquí',
     description: 'Especialistas en color, cortes y peinados para eventos.',
     themeIndex: 4,
+    latitude: 20.5931,
+    longitude: -100.3925,
   ),
   const Business(
     id: 'demo_3',
@@ -58,6 +62,8 @@ final List<Business> demoBusinesses = [
     demo: true,
     slogan: 'Relájate, nosotros nos encargamos',
     description: 'Masajes, faciales y aromaterapia en un ambiente tranquilo.',
+    latitude: 20.6050,
+    longitude: -100.3820,
     themeIndex: 3,
     whatsapp: '4423456789',
   ),

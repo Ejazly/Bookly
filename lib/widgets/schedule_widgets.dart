@@ -61,7 +61,7 @@ class DayChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color background = selected
         ? AppColors.teal
-        : (enabled ? Colors.white : const Color(0xFFE3E8EA));
+        : (enabled ? Colors.white : AppColors.line);
     final Color textColor = selected
         ? Colors.white
         : (enabled ? AppColors.ink : const Color(0xFFA9B4B9));
@@ -165,13 +165,13 @@ class ProChip extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: selected ? AppColors.green : Colors.transparent,
+                color: selected ? AppColors.action : Colors.transparent,
                 width: 3,
               ),
             ),
             child: CircleAvatar(
               radius: 22,
-              backgroundColor: selected ? AppColors.teal : const Color(0xFF8AA9B0),
+              backgroundColor: selected ? AppColors.teal : AppColors.aqua,
               child: name == null
                   ? const Icon(Icons.groups_outlined, color: Colors.white)
                   : Text(
@@ -254,7 +254,7 @@ class StaffSlotPicker extends StatelessWidget {
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: selectedPro == m.name ? AppColors.teal : const Color(0xFFE1E6E8),
+              color: selectedPro == m.name ? AppColors.teal : AppColors.line,
               width: selectedPro == m.name ? 2 : 1,
             ),
           ),

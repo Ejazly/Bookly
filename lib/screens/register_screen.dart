@@ -94,7 +94,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
           ),
           Icon(
             selected ? Icons.check_circle : Icons.circle_outlined,
-            color: selected ? AppColors.green : AppColors.gray,
+            color: selected ? AppColors.action : AppColors.gray,
           ),
         ],
       ),

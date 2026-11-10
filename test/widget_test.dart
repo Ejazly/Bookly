@@ -7,6 +7,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:bookly/logic/geo.dart';
 import 'package:bookly/logic/schedule.dart';
 import 'package:bookly/models/models.dart';
 
@@ -381,6 +382,75 @@ void main() {
         'netCents': 5462,
       });
       expect(m.grossCents - m.feeCents, m.netCents);
+    });
+  });
+
+  group('Información del sitio', () {
+    test('dice si está abierto y cuándo abre', () {
+      // Lunes 26 de octubre de 2026
+      expect(openingStatus(barberia, DateTime(2026, 10, 26, 12)).open, isTrue);
+      expect(openingStatus(barberia, DateTime(2026, 10, 26, 12)).text, 'Abierto · cierra a las 20:00');
+      expect(openingStatus(barberia, DateTime(2026, 10, 26, 8)).text, 'Cerrado · abre hoy a las 10:00');
+      expect(openingStatus(barberia, DateTime(2026, 10, 26, 21)).text, 'Cerrado · abre mañana a las 10:00');
+      // Sábado en la noche: el domingo cierra, abre hasta el lunes.
+      expect(openingStatus(barberia, DateTime(2026, 10, 31, 21)).text, 'Cerrado · abre el lunes a las 10:00');
+    });
+
+    test('guarda y lee la ubicación del mapa', () {
+      final m = {...barberia.toMap(), 'lat': 20.59, 'lng': -100.41};
+      final leido = Business.fromMap('b1', m);
+      expect(leido.hasLocation, isTrue);
+      expect(leido.latitude, 20.59);
+      // Coordenadas inválidas se ignoran.
+      expect(Business.fromMap('b1', {...m, 'lat': 999}).hasLocation, isFalse);
+      expect(barberia.toMap()['lat'], isNull);
+    });
+
+    test('las publicaciones pueden traer video', () {
+      final p = Post.fromMap('p1', {
+        'businessId': 'b1',
+        'text': 'Mira el nuevo corte',
+        'videoUrl': 'https://firebasestorage.googleapis.com/v0/b/x/o/posts%2Fb1%2F1.mp4',
+        'videoPath': 'posts/b1/1.mp4',
+      });
+      expect(p.hasVideo, isTrue);
+      expect(p.toMap()['videoPath'], 'posts/b1/1.mp4');
+      expect(Post.fromMap('p2', {'text': 'Solo texto'}).hasVideo, isFalse);
+    });
+  });
+
+  group('Cerca de ti y catálogo', () {
+    test('calcula distancias y las escribe bonito', () {
+      // Jardín Zenea a Plaza de Armas (Querétaro): unos 400 m
+      final d = distanceMeters(20.5926, -100.3926, 20.5934, -100.3889);
+      expect(d, inInclusiveRange(300, 500));
+      expect(distanceText(437), 'a 440 m');
+      expect(distanceText(1234), 'a 1.2 km');
+      expect(distanceText(15400), 'a 15 km');
+    });
+
+    test('ordena los negocios del más cercano al más lejano', () {
+      final puntos = {'A': (lat: 20.60, lng: -100.39), 'B': (lat: 20.59, lng: -100.39), 'C': (lat: 21.50, lng: -100.39)};
+      final r = nearestFirst<String>(
+        items: puntos.keys,
+        locate: (k) => puntos[k],
+        userLat: 20.589,
+        userLng: -100.39,
+      );
+      expect(r.map((e) => e.item).toList(), ['B', 'A']); // C está a 100 km
+    });
+
+    test('agrupa los servicios por clasificación', () {
+      const items = [
+        Item(id: '1', kind: ItemKind.servicio, name: 'Corte', price: 150, section: 'Cortes'),
+        Item(id: '2', kind: ItemKind.servicio, name: 'Barba', price: 100, section: 'Barba'),
+        Item(id: '3', kind: ItemKind.servicio, name: 'Corte niño', price: 120, section: 'Cortes'),
+        Item(id: '4', kind: ItemKind.servicio, name: 'Ceja', price: 50),
+      ];
+      final g = groupBySection(items);
+      expect(g.map((x) => x.name).toList(), ['Cortes', 'Barba', 'Otros']);
+      expect(g.first.items.length, 2);
+      expect(groupBySection(const [Item(id: '9', kind: ItemKind.servicio, name: 'X', price: 1)]).single.name, 'Todos');
     });
   });
 }
