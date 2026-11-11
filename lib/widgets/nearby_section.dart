@@ -31,7 +31,9 @@ class NearbySection extends StatefulWidget {
 }
 
 class _NearbySectionState extends State<NearbySection> {
-  static const double _radius = 5000; // 5 km
+  static const List<double> _radii = [1000, 3000, 5000, 10000]; // 1, 3, 5 y 10 km
+  double _radius = 5000; // 5 km
+  bool _onlyOpen = false;
 
   LocationAccess? _access; // null = todavía no pide permiso
   bool _starting = false;
@@ -118,7 +120,8 @@ class _NearbySectionState extends State<NearbySection> {
   List<NearbyEntry<Business>> get _nearby {
     final me = _me;
     if (me == null) return const [];
-    return nearestFirst<Business>(
+    final now = DateTime.now();
+    return filterNearby<Business>(
       items: widget.businesses,
       locate: (b) {
         final p = _pointOf(b);
@@ -127,6 +130,51 @@ class _NearbySectionState extends State<NearbySection> {
       userLat: me.latitude,
       userLng: me.longitude,
       radiusMeters: _radius,
+      onlyOpen: _onlyOpen,
+      isOpen: (b) => openingStatus(b, now).open,
+    );
+  }
+
+  void _setFilters({double? radius, bool? onlyOpen}) {
+    setState(() {
+      _radius = radius ?? _radius;
+      _onlyOpen = onlyOpen ?? _onlyOpen;
+      _selectedId = null;
+    });
+    if (_pages.hasClients) _pages.jumpToPage(0);
+    _fit();
+  }
+
+  /// Chips de radio e interruptor "Solo abiertos ahora".
+  Widget _filters() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final r in _radii)
+              ChoiceChip(
+                label: Text(radiusLabel(r)),
+                selected: r == _radius,
+                selectedColor: AppColors.sky,
+                onSelected: (_) => _setFilters(radius: r),
+              ),
+          ],
+        ),
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Solo abiertos ahora', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            Switch(
+              value: _onlyOpen,
+              activeThumbColor: AppColors.blue,
+              onChanged: (v) => _setFilters(onlyOpen: v),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -184,7 +232,13 @@ class _NearbySectionState extends State<NearbySection> {
           ],
         ),
         const SizedBox(height: 10),
-        if (_me == null) _invite() else ...[_mapCard(), const SizedBox(height: 12), _carousel()],
+        if (_me == null) _invite() else ...[
+          _filters(),
+          const SizedBox(height: 4),
+          _mapCard(),
+          const SizedBox(height: 12),
+          _carousel(),
+        ],
       ],
     );
   }
@@ -332,7 +386,7 @@ class _NearbySectionState extends State<NearbySection> {
               ),
               child: Text(
                 nearby.isEmpty
-                    ? 'Buscando negocios…'
+                    ? 'Sin negocios'
                     : '${nearby.length} ${nearby.length == 1 ? 'negocio' : 'negocios'} cerca',
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.teal),
               ),
@@ -360,10 +414,14 @@ class _NearbySectionState extends State<NearbySection> {
   Widget _carousel() {
     final nearby = _nearby;
     if (nearby.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('Todavía no encontramos negocios con ubicación cerca de ti.',
-            textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted)),
+      final km = radiusLabel(_radius);
+      return Padding(
+        padding: const EdgeInsets.all(12),
+        child: Text(
+          _onlyOpen ? 'No hay negocios abiertos en $km' : 'No hay negocios en $km',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: AppColors.muted),
+        ),
       );
     }
     final now = DateTime.now();

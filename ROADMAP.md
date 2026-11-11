@@ -35,7 +35,8 @@ Leyenda: ✅ terminado · 🟡 hecho pero falta probar o configurar · 🔴 ator
 ## ⬜ Antes de Play Store (obligatorio para Google)
 
 - [ ] **Borrar cuenta** desde la app y con un enlace web. Google lo exige porque se pueden
-      crear cuentas.
+      crear cuentas. (En la app y en el servidor ya está hecho: falta publicar la función y
+      probarla. TODO: enlace web, ver BORRAR_CUENTA.md.)
 - [ ] **Política de privacidad** publicada (enlace): qué datos se usan (correo, nombre, fotos,
       ubicación solo en el teléfono, pagos con Stripe).
 - [ ] Formulario de **Seguridad de los datos** y casilla **"Contiene anuncios"**.

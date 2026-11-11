@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../logic/search.dart';
 import '../models/models.dart';
 import '../services/database.dart';
 import '../state/app_state.dart';
@@ -21,6 +22,30 @@ class _HomeScreenState extends State<HomeScreen> {
   final Stream<List<Business>> _stream = Database.instance.businessesStream();
   String _query = '';
   BusinessCategory? _category; // null = Todos
+
+  // Servicios y productos por negocio. Se cargan solo cuando el cliente
+  // empieza a buscar y se guardan para no repetir la consulta.
+  final Map<String, List<SearchItem>> _itemsCache = {};
+  final Set<String> _itemsRequested = {};
+
+  void _loadItems(List<Business> businesses) {
+    for (final b in businesses) {
+      if (!_itemsRequested.add(b.id)) continue;
+      Database.instance.itemsStream(b.id).first.then((items) {
+        if (!mounted) return;
+        setState(() {
+          _itemsCache[b.id] = [
+            for (final i in items)
+              if (i.active)
+                SearchItem(name: i.name, section: i.section, isService: i.isService),
+          ];
+        });
+      }).catchError((_) {
+        // Si falla, se busca solo por nombre, categoría y dirección.
+        if (mounted) setState(() => _itemsCache[b.id] = const []);
+      });
+    }
+  }
 
   Widget _chip(String label, BusinessCategory? category) {
     final selected = _category == category;
@@ -46,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final session = AppScope.of(context);
-    final q = _query.trim().toLowerCase();
+    final q = _query.trim();
     final now = DateTime.now();
 
     return SafeArea(
@@ -66,7 +91,8 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 14),
           TextField(
             onChanged: (v) => setState(() => _query = v),
-            decoration: fieldDecoration('Buscar negocio o dirección', icon: Icons.search),
+            decoration: fieldDecoration('Buscar negocio, servicio o dirección',
+                icon: Icons.search),
           ),
           const SizedBox(height: 12),
           SizedBox(
@@ -88,11 +114,29 @@ class _HomeScreenState extends State<HomeScreen> {
               final byCategory = snapshot.data!
                   .where((b) => _category == null || b.category == _category)
                   .toList();
-              final list = byCategory.where((b) {
-                return q.isEmpty ||
-                    b.name.toLowerCase().contains(q) ||
-                    b.address.toLowerCase().contains(q);
-              }).toList();
+              if (q.isNotEmpty) _loadItems(snapshot.data!);
+              // Cada resultado guarda por qué coincidió (para mostrar el servicio).
+              final hits = <Business, SearchHit>{};
+              final List<Business> list;
+              if (q.isEmpty) {
+                list = byCategory;
+              } else {
+                final scored = <(Business, SearchHit)>[];
+                for (final b in byCategory) {
+                  final h = matchBusiness(
+                    query: q,
+                    name: b.name,
+                    categoryLabel: b.categoryLabel,
+                    address: b.address,
+                    items: _itemsCache[b.id] ?? const [],
+                  );
+                  if (h != null) {
+                    hits[b] = h;
+                    scored.add((b, h));
+                  }
+                }
+                list = rankByScore(scored);
+              }
 
               final Widget results;
               if (list.isEmpty) {
@@ -110,10 +154,43 @@ class _HomeScreenState extends State<HomeScreen> {
                     for (final b in list)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 10),
-                        child: BusinessCard(
-                          business: b,
-                          now: now,
-                          onTap: () => openBusiness(context, b),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            BusinessCard(
+                              business: b,
+                              now: now,
+                              onTap: () => openBusiness(context, b),
+                            ),
+                            if (hits[b]?.matchLabel != null)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      hits[b]!.item!.isService
+                                          ? Icons.content_cut
+                                          : Icons.shopping_bag_outlined,
+                                      size: 14,
+                                      color: AppColors.teal,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        'Ofrece: ${hits[b]!.matchLabel}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.teal,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                   ],

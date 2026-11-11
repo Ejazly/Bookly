@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../services/account_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../widgets/common.dart';
@@ -96,12 +97,87 @@ class ProfileScreen extends StatelessWidget {
                       style: TextStyle(color: AppColors.red)),
                   onTap: () => session.signOut(),
                 ),
+                ListTile(
+                  leading: const Icon(Icons.delete_forever_outlined, color: AppColors.red),
+                  title: const Text('Borrar mi cuenta',
+                      style: TextStyle(color: AppColors.red)),
+                  subtitle: const Text('Elimina tus datos de forma permanente'),
+                  onTap: () => confirmAndDeleteAccount(context),
+                ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+}
+
+/// Doble confirmación (aviso + escribir BORRAR), borra la cuenta en el
+/// servidor y cierra la sesión. También la usa el panel del negocio.
+Future<void> confirmAndDeleteAccount(BuildContext context) async {
+  final session = AppScope.of(context);
+  final messenger = ScaffoldMessenger.of(context);
+  final controller = TextEditingController();
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        title: const Text('¿Borrar tu cuenta?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Se borrarán para siempre tu perfil, tu negocio (si tienes), tus '
+              'publicaciones y tus tarjetas guardadas. No se puede deshacer.\n\n'
+              'Para continuar escribe BORRAR.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(hintText: 'BORRAR'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: controller.text.trim() == 'BORRAR'
+                ? () => Navigator.pop(ctx, true)
+                : null,
+            child: const Text('Borrar cuenta', style: TextStyle(color: AppColors.red)),
+          ),
+        ],
+      ),
+    ),
+  );
+  controller.dispose();
+  if (confirmed != true || !context.mounted) return;
+
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(child: CircularProgressIndicator()),
+  );
+  try {
+    await AccountService.deleteAccount();
+  } on AccountException catch (e) {
+    if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
+    messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    return;
+  }
+  if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
+  try {
+    await session.signOut();
+  } catch (_) {
+    // La cuenta ya no existe; si cerrar sesión falla, el AuthGate la detectará.
   }
 }
 

@@ -33,6 +33,36 @@ class NearbyEntry<T> {
   final double meters;
 }
 
+/// Filtra por radio exacto (sin relleno) y, si [onlyOpen] es verdadero, deja
+/// solo los que [isOpen] marca como abiertos. Ordena por cercanía y aplica
+/// [limit] al final, para que los filtros no se pierdan por el tope.
+List<NearbyEntry<T>> filterNearby<T>({
+  required Iterable<T> items,
+  required ({double lat, double lng})? Function(T item) locate,
+  required double userLat,
+  required double userLng,
+  required double radiusMeters,
+  bool onlyOpen = false,
+  bool Function(T item)? isOpen,
+  int limit = 12,
+}) {
+  final result = <NearbyEntry<T>>[];
+  for (final it in items) {
+    final p = locate(it);
+    if (p == null) continue;
+    final m = distanceMeters(userLat, userLng, p.lat, p.lng);
+    if (m > radiusMeters) continue;
+    if (onlyOpen && !(isOpen?.call(it) ?? false)) continue;
+    result.add(NearbyEntry(it, m));
+  }
+  result.sort((a, b) => a.meters.compareTo(b.meters));
+  return result.take(limit).toList();
+}
+
+/// "1 km", "500 m": el radio para mostrarlo en chips y mensajes.
+String radiusLabel(double meters) =>
+    meters < 1000 ? '${meters.round()} m' : '${(meters / 1000).toStringAsFixed(meters % 1000 == 0 ? 0 : 1)} km';
+
 /// Ordena por cercanía y se queda con los que están dentro de [radiusMeters].
 /// Si ninguno está dentro, regresa los [fallback] más cercanos para que la
 /// sección nunca se vea vacía.

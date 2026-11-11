@@ -25,7 +25,12 @@ const {defineSecret} = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue, Timestamp} = require('firebase-admin/firestore');
+const {getAuth} = require('firebase-admin/auth');
+const {getStorage} = require('firebase-admin/storage');
 const Stripe = require('stripe');
+const {
+  blockingReasons, anonymizeAppointment, anonymizeOrder, chunk: chunkList,
+} = require('./delete_account');
 const {checkBusinessHours, pickProfessional} = require('./schedule');
 const {connectCapabilities, usableAccount} = require('./connect_capabilities');
 
@@ -901,6 +906,87 @@ exports.connectRefreshStatus = onCall(callOptions, safe('connectRefreshStatus', 
 exports.connectDashboard = onCall(callOptions, safe('connectDashboard', async (request) => {
   requireAuth(request);
   fail('failed-precondition', 'Stripe ya no ofrece un panel aparte para tu cuenta; consulta tus cobros en Cobros y ventas.');
+}));
+
+// ---------------------------------------------------------------------------
+// Borrar la cuenta (requisito de Google Play)
+// ---------------------------------------------------------------------------
+async function deleteQueryInBatches(query) {
+  const snap = await query.get();
+  for (const group of chunkList(snap.docs, 500)) {
+    const batch = db.batch();
+    group.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+  return snap.size;
+}
+
+async function anonymizeDocs(docs, patchFor, uid) {
+  const items = docs.map((d) => ({ref: d.ref, patch: patchFor(d.data(), uid)})).filter((x) => x.patch);
+  for (const group of chunkList(items, 500)) {
+    const batch = db.batch();
+    group.forEach((x) => batch.update(x.ref, x.patch));
+    await batch.commit();
+  }
+}
+
+exports.deleteAccount = onCall(callOptions, safe('deleteAccount', async (request) => {
+  const user = requireAuth(request);
+  await rateLimit(user.uid, 'deleteAccount', 3);
+  const uid = user.uid;
+  if ((request.data || {}).confirm !== 'BORRAR') fail('invalid-argument', 'Escribe BORRAR para confirmar.');
+
+  // 1. ¿Hay algo que impida borrar? (citas por venir o pagos pendientes)
+  const [apptClient, apptBiz, ordBuyer, ordBiz] = await Promise.all([
+    db.collection('appointments').where('clientUid', '==', uid).get(),
+    db.collection('appointments').where('businessId', '==', uid).get(),
+    db.collection('orders').where('buyerUid', '==', uid).get(),
+    db.collection('orders').where('businessId', '==', uid).get(),
+  ]);
+  const reasons = blockingReasons({
+    uid,
+    appointments: [...apptClient.docs, ...apptBiz.docs].map((d) => d.data()),
+    orders: [...ordBuyer.docs, ...ordBiz.docs].map((d) => d.data()),
+  });
+  if (reasons.length) fail('failed-precondition', reasons.join(' '));
+
+  // 2. Historial de otros: se quitan nombre y correo, se conservan montos.
+  await anonymizeDocs(apptClient.docs, anonymizeAppointment, uid);
+  await anonymizeDocs(ordBuyer.docs, anonymizeOrder, uid);
+
+  // 3. Datos propios (recursiveDelete incluye subcolecciones: movements, items, gallery, busy).
+  await db.recursiveDelete(db.collection('users').doc(uid));
+  await db.recursiveDelete(db.collection('businesses').doc(uid));
+  await deleteQueryInBatches(db.collection('posts').where('businessId', '==', uid));
+  await db.collection('paymentStatus').doc(uid).delete();
+  try {
+    await getStorage().bucket().deleteFiles({prefix: `posts/${uid}/`});
+  } catch (err) {
+    logger.warn('deleteAccount: no se pudieron borrar los videos', {uid, message: err && err.message});
+  }
+
+  // 4. Stripe: se borra el cliente (tarjetas guardadas). La cuenta Connect NO se
+  // elimina desde aquí (puede tener saldo); solo se quita el vínculo y se deja en el registro.
+  const customerId = await existingCustomer(uid);
+  if (customerId) {
+    try {
+      await stripe().customers.del(customerId);
+    } catch (err) {
+      logger.warn('deleteAccount: no se pudo borrar el cliente de Stripe', {customerId, message: err && err.message});
+    }
+  }
+  await db.collection('stripeCustomers').doc(uid).delete();
+  const account = await getStoredAccount(uid);
+  if (account) {
+    logger.info('deleteAccount: cuenta Connect desvinculada (cerrar a mano en Stripe si hace falta)', {
+      accountId: account.accountId || account.id || null,
+    });
+  }
+  await db.collection('stripeAccounts').doc(uid).delete();
+
+  // 5. Al final, el usuario de Firebase Auth.
+  await getAuth().deleteUser(uid);
+  return {deleted: true};
 }));
 
 // ---------------------------------------------------------------------------
