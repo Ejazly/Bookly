@@ -26,7 +26,7 @@ pide escribir `BORRAR` y llama a `deleteAccount`. Muestra los errores en españo
 citas por venir). Solo lleva la configuración web **pública** de Firebase; no hay llaves secretas.
 
 Pasos:
-1. Poner tu correo real en lugar de `[CORREO DE CONTACTO]` dentro de `public/borrar-cuenta.html`.
+1. Poner tu correo real en lugar de `jaz.2912aguilar@gmail.com` dentro de `public/borrar-cuenta.html`.
 2. Publicar la página:
    ```powershell
    firebase deploy --only hosting --project bookly-c0692
