@@ -121,18 +121,37 @@ class _NearbySectionState extends State<NearbySection> {
     final me = _me;
     if (me == null) return const [];
     final now = DateTime.now();
-    return filterNearby<Business>(
+    ({double lat, double lng})? locate(Business b) {
+      final p = _pointOf(b);
+      return p == null ? null : (lat: p.latitude, lng: p.longitude);
+    }
+
+    final inside = filterNearby<Business>(
       items: widget.businesses,
-      locate: (b) {
-        final p = _pointOf(b);
-        return p == null ? null : (lat: p.latitude, lng: p.longitude);
-      },
+      locate: locate,
       userLat: me.latitude,
       userLng: me.longitude,
       radiusMeters: _radius,
       onlyOpen: _onlyOpen,
       isOpen: (b) => openingStatus(b, now).open,
     );
+    // Si no hay nadie dentro del radio (y no se pidió "solo abiertos"), se
+    // muestran los 3 más cercanos para que el mapa no quede sin puntos.
+    if (inside.isNotEmpty || _onlyOpen) return inside;
+    return nearestFirst<Business>(
+      items: widget.businesses,
+      locate: locate,
+      userLat: me.latitude,
+      userLng: me.longitude,
+      radiusMeters: 0,
+      fallback: 3,
+    );
+  }
+
+  /// Verdadero cuando los negocios mostrados están fuera del radio elegido.
+  bool get _outsideRadius {
+    final n = _nearby;
+    return n.isNotEmpty && n.first.meters > _radius;
   }
 
   void _setFilters({double? radius, bool? onlyOpen}) {
@@ -387,7 +406,9 @@ class _NearbySectionState extends State<NearbySection> {
               child: Text(
                 nearby.isEmpty
                     ? 'Sin negocios'
-                    : '${nearby.length} ${nearby.length == 1 ? 'negocio' : 'negocios'} cerca',
+                    : _outsideRadius
+                        ? 'Ninguno en ${radiusLabel(_radius)} · los más cercanos'
+                        : '${nearby.length} ${nearby.length == 1 ? 'negocio' : 'negocios'} cerca',
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.teal),
               ),
             ),
