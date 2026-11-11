@@ -28,9 +28,23 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final _customCategory = TextEditingController();
   final List<_StaffDraft> _team = [];
   BusinessCategory _category = BusinessCategory.barberias;
-  int _open = 10;
-  int _close = 20;
-  final Set<int> _closedDays = {DateTime.sunday};
+  // Horario de cada día (1 = lunes ... 7 = domingo).
+  final Map<int, _DayDraft> _days = {
+    for (var d = DateTime.monday; d <= DateTime.sunday; d++)
+      d: _DayDraft(open: d != DateTime.sunday, start: 10, end: 20),
+  };
+  /// Hora de apertura más temprana y de cierre más tarde de los días que abre
+  /// (se guardan como horario general para compatibilidad).
+  int get _open {
+    final open = _days.values.where((d) => d.open).map((d) => d.start);
+    return open.isEmpty ? 10 : open.reduce((a, b) => a < b ? a : b);
+  }
+
+  int get _close {
+    final open = _days.values.where((d) => d.open).map((d) => d.end);
+    return open.isEmpty ? 20 : open.reduce((a, b) => a > b ? a : b);
+  }
+
   bool _saving = false;
   bool _filled = false;
   LatLng? _location; // dónde está el negocio en el mapa
@@ -51,11 +65,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
       _category = b.category;
       if (b.hasLocation) _location = LatLng(b.latitude!, b.longitude!);
-      _open = b.openHour;
-      _close = b.closeHour;
-      _closedDays
-        ..clear()
-        ..addAll(b.closedWeekdays);
+      for (var d = DateTime.monday; d <= DateTime.sunday; d++) {
+        final h = b.hoursForWeekday(d);
+        _days[d] = _DayDraft(
+          open: h != null,
+          start: h?.open ?? b.openHour,
+          end: h?.close ?? b.closeHour,
+        );
+      }
     } else {
       _team.add(_StaffDraft(AppScope.read(context).firstName, _open, _close, const {}));
     }
@@ -75,9 +92,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_close <= _open) {
-      showMessage(context, 'La hora de cierre debe ser después de la de apertura.');
+    if (!_days.values.any((d) => d.open)) {
+      showMessage(context, 'Marca al menos un día en que abre tu negocio.');
       return;
+    }
+    for (final e in _days.entries) {
+      if (e.value.open && e.value.end <= e.value.start) {
+        showMessage(context,
+            'El ${weekdayLong(e.key)} la hora de cierre debe ser después de la de apertura.');
+        return;
+      }
     }
     final session = AppScope.read(context);
     final user = session.user;
@@ -119,7 +143,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       phone: _phone.text.trim(),
       openHour: _open,
       closeHour: _close,
-      closedWeekdays: Set<int>.of(_closedDays),
+      closedWeekdays: {
+        for (final e in _days.entries)
+          if (!e.value.open) e.key,
+      },
+      weeklyHours: {
+        for (final e in _days.entries)
+          e.key: e.value.open ? DayHours(e.value.start, e.value.end) : null,
+      },
       professionals: [for (final m in team) m.name],
       staffMembers: team,
       customCategory: _category == BusinessCategory.otro ? _customCategory.text.trim() : '',
@@ -144,6 +175,62 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Una fila por día: interruptor abierto/cerrado, horas y copiar a todos.
+  Widget _dayRow(int d) {
+    final day = _days[d]!;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: AppCard(
+        padding: const EdgeInsets.fromLTRB(12, 4, 4, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Switch(
+                  value: day.open,
+                  activeThumbColor: AppColors.teal,
+                  onChanged: (v) => setState(() => day.open = v),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    weekdayLong(d)[0].toUpperCase() + weekdayLong(d).substring(1),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                if (!day.open)
+                  const Text('Cerrado', style: TextStyle(color: AppColors.red)),
+                IconButton(
+                  tooltip: 'Copiar a todos los días',
+                  icon: const Icon(Icons.copy_all_outlined, color: AppColors.teal),
+                  onPressed: () => setState(() {
+                    for (final other in _days.values) {
+                      other.open = day.open;
+                      other.start = day.start;
+                      other.end = day.end;
+                    }
+                  }),
+                ),
+              ],
+            ),
+            if (day.open)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Row(
+                  children: [
+                    _hourDropdown('Abre', day.start, (v) => setState(() => day.start = v)),
+                    const SizedBox(width: 12),
+                    _hourDropdown('Cierra', day.end, (v) => setState(() => day.end = v)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _hourDropdown(String label, int value, ValueChanged<int> onChanged) {
@@ -319,35 +406,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               },
             ),
             const SectionLabel('Horario'),
-            Row(
-              children: [
-                _hourDropdown('Abre', _open, (v) => setState(() => _open = v)),
-                const SizedBox(width: 12),
-                _hourDropdown('Cierra', _close, (v) => setState(() => _close = v)),
-              ],
+            const Text(
+              'Cada día puede tener su propio horario. Apaga los días que no abres.',
+              style: TextStyle(color: AppColors.muted, fontSize: 12),
             ),
-            const SizedBox(height: 12),
-            const Text('Días que NO abre', style: TextStyle(color: AppColors.muted)),
             const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (var d = DateTime.monday; d <= DateTime.sunday; d++)
-                  FilterChip(
-                    label: Text(weekdayShort(d)),
-                    selected: _closedDays.contains(d),
-                    selectedColor: const Color(0x33C24D4D),
-                    onSelected: (on) => setState(() {
-                      if (on) {
-                        _closedDays.add(d);
-                      } else {
-                        _closedDays.remove(d);
-                      }
-                    }),
-                  ),
-              ],
-            ),
+            for (var d = DateTime.monday; d <= DateTime.sunday; d++) _dayRow(d),
             const SectionLabel('Personal que atiende'),
             Text(
               'Cada persona tiene su propio turno y días de descanso. Al agendar, '
@@ -420,6 +484,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       ),
     );
   }
+}
+
+/// Horario que se está editando de un día.
+class _DayDraft {
+  _DayDraft({required this.open, required this.start, required this.end});
+
+  bool open;
+  int start;
+  int end;
 }
 
 /// Datos que se están editando de una persona del personal.

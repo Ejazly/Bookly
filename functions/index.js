@@ -33,6 +33,7 @@ const {
 } = require('./delete_account');
 const {checkBusinessHours, pickProfessional} = require('./schedule');
 const {connectCapabilities, usableAccount} = require('./connect_capabilities');
+const {decideNotification} = require('./connect_events');
 
 initializeApp();
 const db = getFirestore();
@@ -43,6 +44,7 @@ setGlobalOptions({region: REGION, maxInstances: 10});
 // Llaves secretas (se guardan con `firebase functions:secrets:set ...`).
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
 const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
+const STRIPE_CONNECT_WEBHOOK_SECRET = defineSecret('STRIPE_CONNECT_WEBHOOK_SECRET');
 
 // ---------------------------------------------------------------------------
 // Configuración
@@ -872,6 +874,27 @@ exports.connectOnboarding = onCall(callOptions, safe('connectOnboarding', async 
   return {url: link.url};
 }));
 
+/**
+ * Lee la cuenta v2 en Stripe, calcula sus capacidades y guarda el estado
+ * (stripeAccounts.chargesEnabled). Lo usan connectRefreshStatus y el webhook de Connect.
+ */
+async function syncConnectStatus(businessId, accountId) {
+  const a = await stripe().v2.core.accounts.retrieve(accountId, {
+    include: ['configuration.merchant', 'configuration.recipient'],
+  });
+  const caps = connectCapabilities(a);
+  const status = {
+    connected: true,
+    chargesEnabled: caps.cardPayments,
+    payoutsEnabled: caps.transfers,
+    // En cuentas v2 no hay "details_submitted": se considera enviado cuando
+    // ya están activos el cobro con tarjeta y las transferencias.
+    detailsSubmitted: caps.cardPayments && caps.transfers,
+  };
+  await db.collection('stripeAccounts').doc(businessId).update({chargesEnabled: status.chargesEnabled});
+  return status;
+}
+
 exports.connectRefreshStatus = onCall(callOptions, safe('connectRefreshStatus', async (request) => {
   const user = requireAuth(request);
   await rateLimit(user.uid, 'connectStatus', 20);
@@ -884,17 +907,7 @@ exports.connectRefreshStatus = onCall(callOptions, safe('connectRefreshStatus', 
       await db.collection('stripeAccounts').doc(user.uid).update({chargesEnabled: false});
     }
   } else {
-    const a = await stripe().v2.core.accounts.retrieve(account.accountId, {
-      include: ['configuration.merchant', 'configuration.recipient'],
-    });
-    const caps = connectCapabilities(a);
-    status.connected = true;
-    status.chargesEnabled = caps.cardPayments;
-    status.payoutsEnabled = caps.transfers;
-    // En cuentas v2 no hay "details_submitted": se considera enviado cuando
-    // ya están activos el cobro con tarjeta y las transferencias.
-    status.detailsSubmitted = caps.cardPayments && caps.transfers;
-    await db.collection('stripeAccounts').doc(user.uid).update({chargesEnabled: status.chargesEnabled});
+    Object.assign(status, await syncConnectStatus(user.uid, account.accountId));
   }
   // Estado público (sin el id de la cuenta) para que los clientes sepan si pueden pagar.
   await db.collection('paymentStatus').doc(user.uid).set({...status, updatedAt: FieldValue.serverTimestamp()});
@@ -1035,6 +1048,65 @@ exports.stripeWebhook = onRequest(
       res.json({received: true});
     } catch (err) {
       logger.error('Error procesando webhook', {type: event.type, message: err.message});
+      await eventRef.delete(); // para que Stripe lo reintente
+      res.status(500).send('Error');
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Webhook de Connect (avisos "thin" v2): actualiza solo el estado de cobro.
+// PENDIENTE DE VERIFICAR en la sandbox (ver PAGOS_STRIPE.md).
+// ---------------------------------------------------------------------------
+exports.stripeConnectWebhook = onRequest(
+  {secrets: [STRIPE_SECRET_KEY, STRIPE_CONNECT_WEBHOOK_SECRET], memory: '256MiB'},
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method not allowed');
+      return;
+    }
+    let notification;
+    try {
+      notification = stripe().parseEventNotification(
+        req.rawBody,
+        req.get('stripe-signature'),
+        STRIPE_CONNECT_WEBHOOK_SECRET.value(),
+      );
+    } catch (err) {
+      logger.warn('Webhook de Connect con firma inválida', {message: err.message});
+      res.status(400).send('Invalid signature');
+      return;
+    }
+
+    const decision = decideNotification(notification);
+    if (!decision.process) {
+      res.json({received: true, ignored: decision.reason});
+      return;
+    }
+
+    // Cada evento se procesa una sola vez.
+    const eventRef = db.collection('stripeEvents').doc(notification.id);
+    try {
+      await eventRef.create({type: notification.type, receivedAt: FieldValue.serverTimestamp()});
+    } catch (_) {
+      res.json({received: true, duplicate: true});
+      return;
+    }
+
+    try {
+      const found = await db.collection('stripeAccounts')
+        .where('accountId', '==', decision.accountId).limit(1).get();
+      const doc = found.docs[0];
+      if (!doc || !usableAccount(doc.data())) {
+        // Cuenta que no es de ningún negocio de Bookly: nada que actualizar.
+        res.json({received: true, unknownAccount: true});
+        return;
+      }
+      const status = await syncConnectStatus(doc.id, decision.accountId);
+      await db.collection('paymentStatus').doc(doc.id).set({...status, updatedAt: FieldValue.serverTimestamp()});
+      res.json({received: true});
+    } catch (err) {
+      logger.error('Error procesando webhook de Connect', {type: notification.type, message: err.message});
       await eventRef.delete(); // para que Stripe lo reintente
       res.status(500).send('Error');
     }

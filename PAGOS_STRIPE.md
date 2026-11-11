@@ -174,3 +174,44 @@ destination charges con el id `acct_...`. Ya no existe el panel Express: la func
 cobros en *Cobros y ventas*. Si Stripe dice "signed up for Connect", activa Connect en
 Dashboard → Connect → Empezar. Una cuenta Express creada antes debe borrarse de
 `stripeAccounts/{uid}` para crear una v2 nueva.
+
+## Estado de cobro automático (webhook de Connect) — PENDIENTE DE VERIFICAR
+
+Antes, `stripeAccounts/{uid}.chargesEnabled` y `paymentStatus/{uid}` solo cambiaban cuando el dueño
+tocaba "Actualizar estado". Con dinero real, si Stripe desactivara los cobros de un negocio,
+Bookly seguiría intentando cobrar. La función `stripeConnectWebhook` (separada de `stripeWebhook`)
+recibe los avisos "thin" (v2) de Stripe, verifica la firma con `stripe.parseEventNotification`,
+procesa cada aviso una sola vez (`stripeEvents`), busca el negocio por `accountId`, vuelve a leer
+la cuenta v2 y guarda el estado igual que `connectRefreshStatus`.
+
+Avisos que atiende (lógica en `functions/connect_events.js`):
+- `v2.core.account[configuration.merchant].capability_status_updated`
+- `v2.core.account[configuration.recipient].capability_status_updated`
+
+**Qué falta verificar** (la documentación y los tipos del SDK lo respaldan, pero nunca se probó
+con un aviso real): que Stripe mande el id de la cuenta en `related_object.id`, y el alcance del
+destino ("Tu cuenta" vs "Cuentas conectadas"; según la guía de migración a Accounts v2, los eventos
+v2 de cuentas conectadas usan el alcance **Tu cuenta**, pero otra guía dice **Cuentas conectadas**;
+si no llegan avisos, prueba con el otro).
+
+### Pasos manuales (sandbox)
+1. Guarda el secreto (te pedirá el valor `whsec_...` que Stripe te da en el paso 6):
+   ```powershell
+   firebase functions:secrets:set STRIPE_CONNECT_WEBHOOK_SECRET --project bookly-c0692
+   ```
+   Para poder publicar, el secreto debe existir antes del deploy. Si aún no tienes el
+   `whsec_`, guarda uno temporal y reemplázalo después.
+2. Publica solo esa función (pedirá confirmar el secreto nuevo):
+   ```powershell
+   firebase deploy --only functions:stripeConnectWebhook --project bookly-c0692
+   ```
+   Copia su URL (`https://stripeconnectwebhook-...run.app`). Como `connectRefreshStatus` cambió,
+   publica también `functions:connectRefreshStatus`.
+3. Stripe Dashboard (sandbox) → Developers → Workbench → Webhooks → **Create new destination**.
+4. Events from: **Your account** (si no llegan avisos, prueba **Connected accounts**).
+5. Show advanced options → Payload style: **Thin**. Eventos: los dos de arriba.
+6. Tipo de destino: Webhook endpoint, pega la URL del paso 2. Copia el *Signing secret* (`whsec_...`)
+   y guárdalo con el comando del paso 1 (otro valor distinto al de `STRIPE_WEBHOOK_SECRET`).
+7. Vuelve a publicar `functions:stripeConnectWebhook` para que tome el secreto nuevo.
+8. Prueba: cambia una capacidad de una cuenta de prueba y revisa
+   `firebase functions:log --project bookly-c0692`, y que `paymentStatus/{uid}` cambie.

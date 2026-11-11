@@ -84,3 +84,73 @@ test('negocios viejos sin turnos usan el horario completo', () => {
   const team = teamOf({openHour: 9, closeHour: 18, professionals: ['Luis']});
   assert.deepEqual(team, [{name: 'Luis', startHour: 9, endHour: 18, daysOff: []}]);
 });
+
+// ---- Horario distinto por día (weeklyHours) ----
+// Estos mismos casos y resultados están en test/weekly_hours_test.dart: si
+// cambias uno, cambia el otro para que Dart y JS sigan dando lo mismo.
+const {hoursFor} = require('../schedule');
+
+// Semana del lunes 26 de octubre de 2026 (lunes = 0 ... domingo = 6).
+const dayAt = (offset, h) => Date.UTC(2026, 9, 26 + offset, h + 6);
+const range = (a, b) => Array.from({length: b - a + 1}, (_, i) => a + i);
+
+const weekly = {
+  openHour: 9,
+  closeHour: 19,
+  closedWeekdays: [7],
+  weeklyHours: {
+    1: {open: 10, close: 14},
+    2: {open: 9, close: 19},
+    3: {open: 9, close: 19},
+    4: {open: 9, close: 19},
+    5: {open: 9, close: 19},
+    6: {open: 10, close: 16},
+    7: null,
+  },
+  staff: [
+    {name: 'Evelyn', startHour: 10, endHour: 16, daysOff: [1]},
+    {name: 'Sandy', startHour: 14, endHour: 20, daysOff: []},
+  ],
+};
+
+const slotHours = (b, offset, minutes) =>
+  range(0, 23).filter((h) => checkBusinessHours(b, dayAt(offset, h), minutes).ok);
+const memberHours = (b, offset, minutes, name) =>
+  // Igual que el servidor: primero el horario del negocio, luego el turno.
+  range(0, 23).filter((h) => checkBusinessHours(b, dayAt(offset, h), minutes).ok && pickProfessional({
+    business: b, startMs: dayAt(offset, h), minutes, existing: [], preferred: name, nowMs: 0,
+  }) === name);
+
+test('sin weeklyHours el negocio se comporta igual que antes', () => {
+  assert.deepEqual(hoursFor(business, 2), {open: 10, close: 20});
+  assert.equal(hoursFor(business, 7), null);
+  assert.deepEqual(slotHours(business, 1, 60), range(10, 19)); // martes
+  assert.deepEqual(slotHours(business, 6, 60), []); // domingo
+});
+
+test('weeklyHours: lunes distinto de sábado y domingo cerrado', () => {
+  assert.deepEqual(slotHours(weekly, 0, 60), [10, 11, 12, 13]); // lunes
+  assert.deepEqual(slotHours(weekly, 1, 60), range(9, 18)); // martes
+  assert.deepEqual(slotHours(weekly, 5, 60), range(10, 15)); // sábado
+  assert.deepEqual(slotHours(weekly, 6, 60), []); // domingo cerrado
+  assert.deepEqual(slotHours(weekly, 0, 120), [10, 11, 12]);
+  assert.deepEqual(slotHours(weekly, 5, 120), range(10, 14));
+  assert.equal(checkBusinessHours(weekly, dayAt(6, 12), 60).ok, false);
+});
+
+test('weeklyHours: turnos del personal y días de descanso', () => {
+  assert.deepEqual(memberHours(weekly, 0, 60, 'Evelyn'), []); // descansa lunes
+  assert.deepEqual(memberHours(weekly, 0, 60, 'Sandy'), []); // lunes cierra a las 14
+  assert.deepEqual(memberHours(weekly, 1, 60, 'Evelyn'), range(10, 15));
+  assert.deepEqual(memberHours(weekly, 1, 60, 'Sandy'), range(14, 18)); // tope 19:00
+  assert.deepEqual(memberHours(weekly, 5, 60, 'Sandy'), [14, 15]); // sábado cierra 16
+  assert.deepEqual(memberHours(weekly, 6, 60, 'Sandy'), []);
+});
+
+test('weeklyHours: día ausente o inválido usa el horario general', () => {
+  const b = {openHour: 10, closeHour: 20, closedWeekdays: [3], weeklyHours: {1: {open: 12, close: 8}, 2: {open: 8, close: 12}}};
+  assert.deepEqual(hoursFor(b, 1), {open: 10, close: 20}); // inválido
+  assert.deepEqual(hoursFor(b, 2), {open: 8, close: 12});
+  assert.equal(hoursFor(b, 3), null); // ausente y cerrado en el general
+  assert.deepEqual(hoursFor(b, 4), {open: 10, close: 20});
+});

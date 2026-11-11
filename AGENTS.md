@@ -11,7 +11,8 @@ bienestar (barberías, estéticas, spas, uñas y otros) pagando un **anticipo de
 
 - Autora: Evelyn Jazmín Aguilar Salinas (Ingeniería de Software, Facultad de Informática, UAQ).
 - Nació como proyecto final de *Desarrollo de Aplicaciones Móviles* y se presenta en la feria
-  **Proyéctate**. La meta es publicarla en **Google Play**, gratis y con anuncios.
+  **Proyéctate**. Es gratis y con anuncios. Por ahora **no** se va a publicar en Google Play
+  (decisión de la autora del 10 de noviembre de 2026): no preparar paquete, firma ni fichas.
 - Idioma: **todo en español**: textos de la app, comentarios del código y mensajes de error.
   La autora no habla inglés.
 

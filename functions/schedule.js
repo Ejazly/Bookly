@@ -35,6 +35,28 @@ function toInt(v, fallback) {
   return Number.isInteger(v) ? v : fallback;
 }
 
+/**
+ * Horario de un día de la semana (1 = lunes ... 7 = domingo): {open, close}
+ * en horas, o null si el negocio cierra. Igual que Business.hoursForWeekday.
+ * `weeklyHours` es opcional ({"1": {open, close}, "7": null}); sin él, o
+ * para un día que no aparece, se usa openHour/closeHour y closedWeekdays.
+ */
+function hoursFor(business, weekday) {
+  const w = business.weeklyHours;
+  if (w && typeof w === 'object' && Object.prototype.hasOwnProperty.call(w, String(weekday))) {
+    const d = w[String(weekday)];
+    if (d === null) return null;
+    if (d && Number.isInteger(d.open) && Number.isInteger(d.close) &&
+        d.open >= 0 && d.close <= 24 && d.open < d.close) {
+      return {open: d.open, close: d.close};
+    }
+    // Entrada inválida: se ignora y ese día usa el horario general.
+  }
+  const closed = Array.isArray(business.closedWeekdays) ? business.closedWeekdays : [];
+  if (closed.includes(weekday)) return null;
+  return {open: toInt(business.openHour, 9), close: toInt(business.closeHour, 19)};
+}
+
 /** Personal con su turno (igual que Business.team en la app). */
 function teamOf(business) {
   const open = toInt(business.openHour, 9);
@@ -61,10 +83,10 @@ function teamOf(business) {
  */
 function checkBusinessHours(business, startMs, minutes) {
   const local = localParts(startMs);
-  const closed = Array.isArray(business.closedWeekdays) ? business.closedWeekdays : [];
-  if (closed.includes(local.weekday)) return {ok: false, reason: 'El negocio no abre ese día.'};
-  const open = toInt(business.openHour, 9) * 60;
-  const close = toInt(business.closeHour, 19) * 60;
+  const hours = hoursFor(business, local.weekday);
+  if (!hours) return {ok: false, reason: 'El negocio no abre ese día.'};
+  const open = hours.open * 60;
+  const close = hours.close * 60;
   const start = local.minutesOfDay;
   if ((start - open) % SLOT_STEP_MINUTES !== 0) {
     return {ok: false, reason: 'Ese horario no es válido.'};
@@ -120,6 +142,7 @@ module.exports = {
   TIME_ZONE,
   localParts,
   teamOf,
+  hoursFor,
   checkBusinessHours,
   memberWorks,
   isActive,

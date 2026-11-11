@@ -409,7 +409,8 @@ class _HoursCard extends StatelessWidget {
           for (var d = 1; d <= 7; d++)
             Builder(builder: (context) {
               final today = now.weekday == d;
-              final closed = b.closedWeekdays.contains(d);
+              final hours = b.hoursForWeekday(d);
+              final closed = hours == null;
               return Container(
                 margin: const EdgeInsets.symmetric(vertical: 2),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -441,7 +442,7 @@ class _HoursCard extends StatelessWidget {
                       ),
                     const Spacer(),
                     Text(
-                      closed ? 'Cerrado' : b.hoursText,
+                      closed ? 'Cerrado' : hours.text,
                       style: TextStyle(
                         color: closed ? AppColors.red : AppColors.ink,
                         fontWeight: today ? FontWeight.bold : FontWeight.normal,

@@ -21,10 +21,11 @@ class BookingException implements Exception {
 /// Horarios posibles de un día: desde la apertura, cada [slotStepMinutes],
 /// siempre que el servicio termine antes o justo a la hora de cierre.
 List<DateTime> slotsFor(Business business, int minutes, DateTime day) {
-  if (!business.isOpenOn(day)) return const [];
-  final close = DateTime(day.year, day.month, day.day, business.closeHour);
+  final hours = business.hoursOn(day);
+  if (hours == null) return const [];
+  final close = DateTime(day.year, day.month, day.day, hours.close);
   final result = <DateTime>[];
-  var start = DateTime(day.year, day.month, day.day, business.openHour);
+  var start = DateTime(day.year, day.month, day.day, hours.open);
   while (!start.add(Duration(minutes: minutes)).isAfter(close)) {
     result.add(start);
     start = start.add(const Duration(minutes: slotStepMinutes));
@@ -137,17 +138,19 @@ bool isRefundable(Appointment a, DateTime now) =>
 /// ¿Está abierto ahora? Regresa el estado y un texto como
 /// "Abierto · cierra a las 20:00" o "Cerrado · abre mañana a las 10:00".
 ({bool open, String text}) openingStatus(Business b, DateTime now) {
+  final today = b.hoursOn(now);
   if (b.isOpenAt(now)) {
-    return (open: true, text: 'Abierto · cierra a las ${b.closeHour}:00');
+    return (open: true, text: 'Abierto · cierra a las ${today!.close}:00');
   }
-  if (b.isOpenOn(now) && now.hour < b.openHour) {
-    return (open: false, text: 'Cerrado · abre hoy a las ${b.openHour}:00');
+  if (today != null && now.hour < today.open) {
+    return (open: false, text: 'Cerrado · abre hoy a las ${today.open}:00');
   }
   for (var i = 1; i <= 7; i++) {
     final day = now.add(Duration(days: i));
-    if (b.isOpenOn(day)) {
+    final h = b.hoursOn(day);
+    if (h != null) {
       final when = i == 1 ? 'mañana' : 'el ${weekdayLong(day.weekday)}';
-      return (open: false, text: 'Cerrado · abre $when a las ${b.openHour}:00');
+      return (open: false, text: 'Cerrado · abre $when a las ${h.open}:00');
     }
   }
   return (open: false, text: 'Cerrado por ahora');

@@ -19,11 +19,26 @@ Notas: la cuenta Connect de Stripe **no se elimina** automáticamente (puede ten
 queda en el registro de la función (`firebase functions:logs`) para cerrarla a mano en Stripe.
 Las citas pasadas de un negocio borrado quedan en el historial de sus clientes.
 
-## Enlace web (pendiente)
-Google pide una URL pública. Opciones:
-- Más simple: en la página de la política de privacidad, explicar que se borra desde
-  Perfil → Borrar mi cuenta, y que quien no pueda entrar escriba al correo de soporte; la autora
-  borra el usuario en Firebase Console → Authentication y los datos con la función.
-- Completa: una página web con inicio de sesión de Firebase que llame a `deleteAccount`.
+## Enlace web (hecho, falta publicar)
+La página está en `public/borrar-cuenta.html` (Firebase Hosting, configurado en `firebase.json`).
+Explica qué se borra y qué se conserva, pide iniciar sesión (Google o correo + contraseña),
+pide escribir `BORRAR` y llama a `deleteAccount`. Muestra los errores en español (por ejemplo,
+citas por venir). Solo lleva la configuración web **pública** de Firebase; no hay llaves secretas.
 
-Pendiente: publicar la función (`firebase deploy --only functions --project bookly-c0692`).
+Pasos:
+1. Poner tu correo real en lugar de `[CORREO DE CONTACTO]` dentro de `public/borrar-cuenta.html`.
+2. Publicar la página:
+   ```powershell
+   firebase deploy --only hosting --project bookly-c0692
+   ```
+3. La URL para **Play Console** (Contenido de la app → Eliminación de datos) es:
+   `https://bookly-c0692.web.app/borrar-cuenta` (también funciona en
+   `https://bookly-c0692.firebaseapp.com/borrar-cuenta`).
+4. Paso manual: Firebase Console → Authentication → Configuración → Dominios autorizados.
+   `bookly-c0692.web.app` y `bookly-c0692.firebaseapp.com` suelen venir ya autorizados; si el botón
+   de Google dice que el dominio no está autorizado, agrégalo ahí.
+5. Probar con una cuenta de prueba (no la tuya real) y confirmar que el usuario desaparece de
+   Authentication.
+
+Pendiente: publicar la función (`firebase deploy --only functions --project bookly-c0692`);
+sin ella la página no puede borrar nada.

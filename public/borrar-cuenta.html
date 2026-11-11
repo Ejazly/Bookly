@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Borrar mi cuenta de Bookly</title>
+<style>
+  :root{--teal:#1E5E6B;--blue:#28588B;--aqua:#64ABB0;--sky:#ADDCEE;--mist:#DDF5FB;--ok:#2E7D32;--err:#B3261E}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--mist);color:#12343b;line-height:1.5}
+  header{background:var(--teal);color:#fff;padding:20px 16px;text-align:center}
+  header h1{margin:0;font-size:1.5rem}
+  main{max-width:640px;margin:0 auto;padding:16px}
+  section{background:#fff;border:1px solid var(--sky);border-radius:12px;padding:16px;margin:16px 0}
+  h2{color:var(--teal);font-size:1.15rem;margin-top:0}
+  ul{padding-left:20px;margin:8px 0}
+  button{font:inherit;border:0;border-radius:10px;padding:12px 16px;cursor:pointer;background:var(--blue);color:#fff;width:100%;margin-top:10px}
+  button.sec{background:#fff;color:var(--blue);border:1px solid var(--blue)}
+  button.danger{background:var(--err)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  input{font:inherit;width:100%;padding:11px;border:1px solid var(--aqua);border-radius:10px;margin-top:8px}
+  label{display:block;margin-top:8px;font-weight:600}
+  .msg{margin-top:12px;padding:10px 12px;border-radius:10px;display:none}
+  .msg.err{display:block;background:#fdecea;color:var(--err)}
+  .msg.ok{display:block;background:#e8f5e9;color:var(--ok)}
+  .hidden{display:none}
+  footer{text-align:center;font-size:.9rem;padding:8px 16px 32px}
+</style>
+</head>
+<body>
+<header><h1>Borrar mi cuenta de Bookly</h1></header>
+<main>
+  <section>
+    <h2>Qué se borra</h2>
+    <ul>
+      <li>Tu perfil y tus datos de cuenta (nombre, correo, perfil de cliente y de negocio).</li>
+      <li>Si tienes negocio: su sitio, servicios, productos, galería, horarios ocupados, ingresos y publicaciones (incluidos los videos).</li>
+      <li>Tu historial de pagos en la billetera y tu registro de cliente en Stripe (las tarjetas guardadas); Bookly nunca almacenó los datos de tus tarjetas.</li>
+      <li>Tu inicio de sesión (Google o correo y contraseña).</li>
+    </ul>
+    <h2>Qué se conserva</h2>
+    <ul>
+      <li>Las citas y compras ya realizadas se conservan <strong>anonimizadas</strong> (sin tu nombre ni correo), solo con fechas y montos, por motivos contables.</li>
+      <li>Las citas pasadas de un negocio borrado siguen en el historial de sus clientes.</li>
+      <li>La cuenta de cobros del negocio en Stripe se cierra aparte, porque puede tener saldo.</li>
+    </ul>
+    <p><strong>No se puede borrar</strong> si tienes citas confirmadas por venir (como cliente o como negocio) o pagos pendientes. Cancélalas o espera a que pasen y vuelve a intentarlo.</p>
+    <p><strong>Esta acción no se puede deshacer.</strong></p>
+  </section>
+
+  <section id="paso1">
+    <h2>1. Inicia sesión</h2>
+    <p>Entra con la misma cuenta que usas en Bookly.</p>
+    <button id="google" type="button">Continuar con Google</button>
+    <form id="formCorreo" style="margin-top:12px">
+      <label for="correo">Correo</label>
+      <input id="correo" type="email" autocomplete="email" required>
+      <label for="clave">Contraseña</label>
+      <input id="clave" type="password" autocomplete="current-password" required>
+      <button class="sec" type="submit">Entrar con correo y contraseña</button>
+    </form>
+  </section>
+
+  <section id="paso2" class="hidden">
+    <h2>2. Confirma el borrado</h2>
+    <p>Sesión iniciada como <strong id="quien"></strong>.</p>
+    <label for="confirmar">Escribe BORRAR (en mayúsculas) para confirmar</label>
+    <input id="confirmar" type="text" autocomplete="off" autocapitalize="characters">
+    <button id="borrar" class="danger" type="button" disabled>Borrar mi cuenta definitivamente</button>
+    <button id="salir" class="sec" type="button">Cancelar y cerrar sesión</button>
+  </section>
+
+  <div id="msg" class="msg" role="status" aria-live="polite"></div>
+
+  <section>
+    <h2>¿No puedes iniciar sesión?</h2>
+    <p>Escribe a <strong>[CORREO DE CONTACTO]</strong> desde el correo de tu cuenta y te ayudaremos a borrarla.</p>
+  </section>
+</main>
+<footer>Bookly · Evelyn Jazmín Aguilar Salinas · UAQ</footer>
+
+<script type="module">
+  // Configuración web PÚBLICA de Firebase (la misma de la app web). No contiene secretos.
+  import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+  import {getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged}
+    from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+  import {getFunctions, httpsCallable} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js";
+
+  const app = initializeApp({
+    apiKey: "AIzaSyCEwzNho5RRi_W-QgjN6d-_VsBvVhB3wbo",
+    appId: "1:22719666591:web:225245a947aa66005445aa",
+    messagingSenderId: "22719666591",
+    projectId: "bookly-c0692",
+    authDomain: "bookly-c0692.firebaseapp.com",
+    storageBucket: "bookly-c0692.firebasestorage.app"
+  });
+  const auth = getAuth(app);
+  auth.languageCode = "es";
+  const borrarCuenta = httpsCallable(getFunctions(app, "us-central1"), "deleteAccount");
+
+  const $ = (id) => document.getElementById(id);
+  const aviso = (texto, tipo) => { const m = $("msg"); m.textContent = texto; m.className = "msg " + (tipo || "err"); };
+  const limpiar = () => { $("msg").className = "msg"; $("msg").textContent = ""; };
+  let terminado = false;
+
+  function errorAuth(e) {
+    const c = e && e.code;
+    if (c === "auth/popup-closed-by-user" || c === "auth/cancelled-popup-request") return "Cerraste la ventana de inicio de sesión.";
+    if (c === "auth/popup-blocked") return "El navegador bloqueó la ventana emergente. Permítela e inténtalo de nuevo.";
+    if (c === "auth/invalid-credential" || c === "auth/wrong-password" || c === "auth/user-not-found" || c === "auth/invalid-email")
+      return "Correo o contraseña incorrectos.";
+    if (c === "auth/too-many-requests") return "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.";
+    if (c === "auth/network-request-failed") return "Sin conexión. Revisa tu internet.";
+    if (c === "auth/unauthorized-domain") return "Este sitio aún no está autorizado para iniciar sesión con Google. Usa correo y contraseña o escribe al correo de contacto.";
+    return "No se pudo iniciar sesión. Inténtalo de nuevo.";
+  }
+
+  function errorBorrado(e) {
+    const c = (e && e.code) || "";
+    // Los mensajes del servidor ya vienen en español (citas por venir, pagos pendientes, etc.).
+    if (c.endsWith("failed-precondition") || c.endsWith("invalid-argument") || c.endsWith("resource-exhausted")) {
+      return e.message || "No se puede borrar la cuenta ahora.";
+    }
+    if (c.endsWith("unauthenticated")) return "Tu sesión venció. Inicia sesión de nuevo.";
+    if (c.endsWith("permission-denied")) return "Verifica tu correo desde la app de Bookly e inténtalo de nuevo.";
+    if (c.endsWith("unavailable") || c.endsWith("deadline-exceeded")) return "No hay conexión con el servidor. Inténtalo de nuevo en un momento.";
+    return "No se pudo borrar la cuenta. Inténtalo de nuevo o escribe al correo de contacto.";
+  }
+
+  onAuthStateChanged(auth, (u) => {
+    if (terminado) return;
+    $("paso1").classList.toggle("hidden", !!u);
+    $("paso2").classList.toggle("hidden", !u);
+    $("quien").textContent = u ? (u.email || u.displayName || "tu cuenta") : "";
+  });
+
+  $("google").addEventListener("click", async () => {
+    limpiar();
+    try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch (e) { aviso(errorAuth(e)); }
+  });
+  $("formCorreo").addEventListener("submit", async (ev) => {
+    ev.preventDefault(); limpiar();
+    try { await signInWithEmailAndPassword(auth, $("correo").value.trim(), $("clave").value); }
+    catch (e) { aviso(errorAuth(e)); }
+  });
+  $("confirmar").addEventListener("input", () => { $("borrar").disabled = $("confirmar").value.trim() !== "BORRAR"; });
+  $("salir").addEventListener("click", async () => { limpiar(); $("confirmar").value = ""; $("borrar").disabled = true; await signOut(auth); });
+
+  $("borrar").addEventListener("click", async () => {
+    limpiar();
+    if ($("confirmar").value.trim() !== "BORRAR") return;
+    $("borrar").disabled = true;
+    aviso("Borrando tu cuenta, esto puede tardar unos segundos...", "ok");
+    try {
+      await borrarCuenta({confirm: "BORRAR"});
+      terminado = true;
+      try { await signOut(auth); } catch (_) {}
+      $("paso1").classList.add("hidden");
+      $("paso2").classList.add("hidden");
+      aviso("Tu cuenta y tus datos se borraron. Gracias por haber usado Bookly.", "ok");
+    } catch (e) {
+      aviso(errorBorrado(e));
+      $("borrar").disabled = $("confirmar").value.trim() !== "BORRAR";
+    }
+  });
+</script>
+</body>
+</html>

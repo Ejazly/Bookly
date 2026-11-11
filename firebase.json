@@ -40,5 +40,19 @@
   ],
   "storage": {
     "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/borrar-cuenta",
+        "destination": "/borrar-cuenta.html"
+      }
+    ]
   }
 }

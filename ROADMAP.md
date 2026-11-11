@@ -13,8 +13,6 @@ Leyenda: ✅ terminado · 🟡 hecho pero falta probar o configurar · 🔴 ator
 |---|---|---|---|
 | 1 | **Activar cobros del negocio (Stripe Connect)** | Primero salía "You can only create new accounts if you've signed up for Connect". Ya se activó Connect y se creó la cuenta del negocio, pero falta confirmar que diga **"Cobros activos"** | **Cambio:** Stripe rechazó cuentas Express (la plataforma tiene a Stripe como responsable de pérdidas), así que `connectOnboarding` ahora crea cuentas **v2 sin panel Express** (se quitó el botón del panel). Hay que publicar las funciones y reconectar con una cuenta nueva (la cuenta Express anterior ya no sirve; borrar `stripeAccounts/{uid}`). Cuenta → Cobros y ventas → *Actualizar estado*. Si falta, *Continuar en Stripe* con datos de prueba. Mientras tanto, en modo prueba se puede cobrar sin Connect. **Cómo probar:** ya no hace falta borrar `stripeAccounts/{uid}` (el registro viejo se migra solo); publicar funciones y tocar Cobros y ventas → *Continuar en Stripe*. **Pendiente con dinero real:** manejar el evento `account.updated` (hoy `chargesEnabled` solo se guarda al tocar *Actualizar estado*). **Ojo:** la API v2 en modo prueba clásico rechazó el enlace de registro ("Please switch to an account created in a sandbox"); puede requerir una *sandbox* de Stripe |
 | 2 | **Webhook de Stripe** | Si `STRIPE_WEBHOOK_SECRET` no tiene el `whsec_` real, las citas se quedan en "Esperando pago" | Stripe → Desarrolladores → Webhooks → destino `…/stripeWebhook` con `checkout.session.completed` y `checkout.session.expired` → guardar el secreto (ver PAGOS_STRIPE.md, paso 6) |
-| 3 | **Publicar en Google Play** | Falta pagar la cuenta de desarrollador (**US$25**, un solo pago) | Juntar el pago. Mientras tanto, preparar lo de la sección "Antes de Play Store" |
-| 4 | **Prueba cerrada de Play** | Las cuentas personales nuevas necesitan **12 testers durante 14 días seguidos** antes de publicar | Conseguir unos 15 compañeros con Android y sus correos de Gmail |
 
 ## 🟡 Hecho, falta configurar o probar
 
@@ -31,22 +29,10 @@ Leyenda: ✅ terminado · 🟡 hecho pero falta probar o configurar · 🔴 ator
 - [ ] Anuncios de prueba de AdMob en Android (en la web no salen, es normal).
 - [ ] Correr `flutter test` y `npm test` después de los últimos cambios.
 - [ ] Llenar los nombres pendientes en la ficha técnica de Proyéctate.
-
-## ⬜ Antes de Play Store (obligatorio para Google)
-
-- [ ] **Borrar cuenta** desde la app y con un enlace web. Google lo exige porque se pueden
-      crear cuentas. (En la app y en el servidor ya está hecho: falta publicar la función y
-      probarla. TODO: enlace web, ver BORRAR_CUENTA.md.)
-- [ ] **Política de privacidad** publicada (enlace): qué datos se usan (correo, nombre, fotos,
-      ubicación solo en el teléfono, pagos con Stripe).
-- [ ] Formulario de **Seguridad de los datos** y casilla **"Contiene anuncios"**.
-- [ ] Cuenta de **AdMob** propia: cambiar los IDs de prueba en `lib/config/ads_config.dart` y
-      `AndroidManifest.xml`, y bloquear categorías sensibles (ver ANUNCIOS.md).
-- [ ] Ícono de la app, nombre del paquete definitivo (`applicationId`) y llave de firma
-      (keystore) para el release.
-- [ ] Generar el `.aab`: `flutter build appbundle`.
-- [ ] Capturas de pantalla y descripción para la ficha de Play.
-- [ ] Agregar el SHA-1 de la llave de release a Firebase (para el inicio de sesión con Google).
+- [ ] **Borrar cuenta** (botón en el perfil y función `deleteAccount`): falta publicar la
+      función y probarla. Hay también un enlace web en `public/borrar-cuenta.html`: falta poner
+      el correo de contacto y publicar con `firebase deploy --only hosting` (ver
+      BORRAR_CUENTA.md).
 
 ## ⬜ Para cobrar dinero real (después)
 

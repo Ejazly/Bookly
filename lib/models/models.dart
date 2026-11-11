@@ -141,6 +141,44 @@ const List<List<Color>> sitePalettes = [
   [Color(0xFFD9A441), Color(0xFF9C6B12)], // dorado
 ];
 
+/// Horario de un día: de [open] a [close] (horas en punto, ej. 10 y 20).
+class DayHours {
+  const DayHours(this.open, this.close);
+
+  final int open;
+  final int close;
+
+  String get text => '$open:00 – $close:00';
+
+  @override
+  bool operator ==(Object other) =>
+      other is DayHours && other.open == open && other.close == close;
+
+  @override
+  int get hashCode => Object.hash(open, close);
+}
+
+/// Lee `weeklyHours` de Firestore: {"1": {open, close}, "7": null, ...}.
+/// La llave es el día (1 = lunes ... 7 = domingo); null = cerrado. Las
+/// entradas inválidas se ignoran (ese día usa el horario general).
+/// Si no hay `weeklyHours` regresa null y el negocio se comporta como antes.
+Map<int, DayHours?>? _weeklyHours(Object? v) {
+  if (v is! Map) return null;
+  final result = <int, DayHours?>{};
+  v.forEach((k, value) {
+    final day = int.tryParse('$k');
+    if (day == null || day < 1 || day > 7) return;
+    if (value == null) {
+      result[day] = null;
+    } else if (value is Map && value['open'] is num && value['close'] is num) {
+      final open = (value['open'] as num).toInt();
+      final close = (value['close'] as num).toInt();
+      if (open >= 0 && close <= 24 && open < close) result[day] = DayHours(open, close);
+    }
+  });
+  return result.isEmpty ? null : result;
+}
+
 /// Persona que atiende en el negocio, con su propio horario.
 /// Ej. Evelyn trabaja de 10:00 a 16:00 y descansa los lunes.
 class StaffMember {
@@ -198,6 +236,7 @@ class Business {
     required this.closedWeekdays,
     required this.professionals,
     this.staffMembers = const [],
+    this.weeklyHours,
     this.customCategory = '',
     this.rating = 0,
     this.demo = false,
@@ -225,6 +264,12 @@ class Business {
   final Set<int> closedWeekdays; // DateTime.monday ... DateTime.sunday
   final List<String> professionals; // solo nombres (versiones anteriores)
   final List<StaffMember> staffMembers; // personal con su horario
+
+  /// Horario distinto por día (1 = lunes ... 7 = domingo; null = cerrado).
+  /// Es opcional: si es null, todos los días que abre usan [openHour]–[closeHour]
+  /// y [closedWeekdays] (negocios anteriores). Un día que no aparece también
+  /// usa ese horario general.
+  final Map<int, DayHours?>? weeklyHours;
   final String customCategory; // tipo de negocio escrito a mano si eligió "Otros"
   final double rating;
   final bool demo; // negocios de ejemplo
@@ -287,11 +332,25 @@ class Business {
     return null;
   }
 
-  bool isOpenOn(DateTime day) => !closedWeekdays.contains(day.weekday);
+  /// Horario de un día de la semana (1 = lunes ... 7 = domingo), o null si cierra.
+  DayHours? hoursForWeekday(int weekday) {
+    final w = weeklyHours;
+    if (w != null && w.containsKey(weekday)) return w[weekday];
+    if (closedWeekdays.contains(weekday)) return null;
+    return DayHours(openHour, closeHour);
+  }
 
-  bool isOpenAt(DateTime moment) =>
-      isOpenOn(moment) && moment.hour >= openHour && moment.hour < closeHour;
+  /// Horario de esa fecha, o null si el negocio no abre.
+  DayHours? hoursOn(DateTime day) => hoursForWeekday(day.weekday);
 
+  bool isOpenOn(DateTime day) => hoursOn(day) != null;
+
+  bool isOpenAt(DateTime moment) {
+    final h = hoursOn(moment);
+    return h != null && moment.hour >= h.open && moment.hour < h.close;
+  }
+
+  /// Horario general (con horario por día muestra el más amplio).
   String get hoursText => '$openHour:00 – $closeHour:00';
 
   factory Business.fromMap(String id, Map<String, dynamic> m) {
@@ -310,6 +369,7 @@ class Business {
           closed is List ? closed.whereType<num>().map((n) => n.toInt()).toSet() : <int>{},
       professionals: _stringList(m['professionals']),
       staffMembers: _staffList(m['staff'], _int(m['openHour'], 9), _int(m['closeHour'], 19)),
+      weeklyHours: _weeklyHours(m['weeklyHours']),
       customCategory: _string(m['customCategory']),
       rating: _double(m['rating']),
       demo: _bool(m['demo']),
@@ -345,6 +405,12 @@ class Business {
         'closedWeekdays': closedWeekdays.toList()..sort(),
         'professionals': staff,
         'staff': [for (final m in staffMembers) m.toMap()],
+        // Solo se guarda si el negocio definió horario por día.
+        if (weeklyHours != null)
+          'weeklyHours': {
+            for (final e in weeklyHours!.entries)
+              '${e.key}': e.value == null ? null : {'open': e.value!.open, 'close': e.value!.close},
+          },
         'customCategory': customCategory,
         'rating': rating,
         'demo': demo,
@@ -390,6 +456,7 @@ class Business {
       closedWeekdays: closedWeekdays,
       professionals: professionals,
       staffMembers: staffMembers,
+      weeklyHours: weeklyHours,
       customCategory: customCategory,
       rating: rating,
       demo: demo,
