@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_config.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 
 import '../models/models.dart';
@@ -8,8 +9,8 @@ import '../theme/app_colors.dart';
 import 'common.dart';
 import 'images.dart';
 
-/// Mapa de Bookly. Usa los mapas libres de OpenStreetMap con el estilo
-/// "Voyager" de CARTO, que no necesitan llave ni cuenta de pago.
+/// Mapa de Bookly. Usa los mapas libres de OpenStreetMap (ver config/map_config.dart),
+/// que no necesitan llave ni cuenta de pago.
 class BooklyMap extends StatelessWidget {
   const BooklyMap({
     super.key,
@@ -49,13 +50,7 @@ class BooklyMap extends StatelessWidget {
         onTap: onTap == null ? null : (_, point) => onTap!(point),
       ),
       children: [
-        TileLayer(
-          urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-          subdomains: const ['a', 'b', 'c', 'd'],
-          retinaMode: RetinaMode.isHighDensity(context),
-          maxNativeZoom: 20,
-          userAgentPackageName: 'mx.uaq.bookly',
-        ),
+        booklyTileLayer(),
         if (marker != null)
           MarkerLayer(
             markers: [
@@ -67,14 +62,7 @@ class BooklyMap extends StatelessWidget {
               ),
             ],
           ),
-        const RichAttributionWidget(
-          alignment: AttributionAlignment.bottomLeft,
-          showFlutterMapAttribution: false,
-          attributions: [
-            TextSourceAttribution('OpenStreetMap'),
-            TextSourceAttribution('CARTO'),
-          ],
-        ),
+        booklyAttribution(),
       ],
     );
   }
@@ -251,14 +239,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               onTap: (_, p) => setState(() => _point = p),
             ),
             children: [
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                retinaMode: RetinaMode.isHighDensity(context),
-                maxNativeZoom: 20,
-                userAgentPackageName: 'mx.uaq.bookly',
-              ),
+              booklyTileLayer(),
               if (point != null)
                 MarkerLayer(markers: [
                   Marker(
@@ -268,14 +249,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     child: BusinessPin(business: widget.preview),
                   ),
                 ]),
-              const RichAttributionWidget(
-                alignment: AttributionAlignment.bottomLeft,
-                showFlutterMapAttribution: false,
-                attributions: [
-                  TextSourceAttribution('OpenStreetMap'),
-                  TextSourceAttribution('CARTO'),
-                ],
-              ),
+              booklyAttribution(),
             ],
           ),
           // Buscador flotante

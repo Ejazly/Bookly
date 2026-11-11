@@ -241,7 +241,7 @@ Qué protegen las reglas de `storage.rules`:
 
 ## Mapa del negocio
 
-El mapa de la pestaña **Información** usa **OpenStreetMap** (estilo CARTO Voyager):
+El mapa de la pestaña **Información** usa **OpenStreetMap** (mapa estándar):
 no necesita llave de Google ni pago. El negocio marca su ubicación en
 **Cuenta → Datos del negocio → Marca tu negocio en el mapa**. Si no la marca, la app
 busca su dirección automáticamente. El botón **Cómo llegar** abre Google Maps.

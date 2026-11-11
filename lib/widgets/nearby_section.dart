@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import '../config/map_config.dart';
 import 'package:geolocator/geolocator.dart' show Position;
 import 'package:latlong2/latlong.dart' show LatLng;
 
@@ -291,13 +292,7 @@ class _NearbySectionState extends State<NearbySection> {
               },
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                retinaMode: RetinaMode.isHighDensity(context),
-                maxNativeZoom: 20,
-                userAgentPackageName: 'mx.uaq.bookly',
-              ),
+              booklyTileLayer(),
               CircleLayer(circles: [
                 CircleMarker(
                   point: me,
@@ -322,11 +317,7 @@ class _NearbySectionState extends State<NearbySection> {
                   ),
                 Marker(point: me, width: 60, height: 60, child: const _MeDot()),
               ]),
-              const RichAttributionWidget(
-                alignment: AttributionAlignment.bottomLeft,
-                showFlutterMapAttribution: false,
-                attributions: [TextSourceAttribution('OpenStreetMap'), TextSourceAttribution('CARTO')],
-              ),
+              booklyAttribution(),
             ],
           ),
           Positioned(

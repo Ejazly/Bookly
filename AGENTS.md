@@ -38,7 +38,7 @@ bienestar (barberías, estéticas, spas, uñas y otros) pagando un **anticipo de
 | Servidor | Cloud Functions v2, Node 22 (`functions/`) |
 | Pagos | Stripe Checkout + Stripe Connect Express (modo prueba) |
 | Correos | EmailJS (desde la app) |
-| Mapas | flutter_map + teselas CARTO Voyager (OpenStreetMap). Geocodificación: Nominatim |
+| Mapas | flutter_map + teselas estándar de OpenStreetMap (definidas solo en `lib/config/map_config.dart`). Geocodificación: Nominatim |
 | Ubicación | geolocator |
 | Anuncios | google_mobile_ads (AdMob), solo Android/iOS |
 | Video | video_player + visibility_detector |
